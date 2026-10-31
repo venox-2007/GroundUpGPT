@@ -60,8 +60,9 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
 | Byte-Pair Encoding (BPE) Tokenizer | AI Engine | **Implemented** | Byte-level subword BPE & lossless UTF-8 (Step 5) |
 | Token & Positional Embeddings | AI Engine | **Implemented** | Learnable token + absolute position lookup (Step 7) |
 | Single-Head Causal Self-Attention | AI Engine | **Implemented** | Explicit Q, K, V with triangular masking (Step 7) |
-| Multi-Head Self-Attention & MLP | AI Engine | *Planned* | Parallel attention heads, projections, and FFN |
-| Full Transformer Blocks & Residuals | AI Engine | *Planned* | Modular Pre-LN architecture |
+| Multi-Head Self-Attention & MLP | AI Engine | **Implemented** | Parallel heads, linear projection, and GELU FFN (Step 8) |
+| Full Transformer Blocks & Residuals | AI Engine | **Implemented** | Modular Pre-LN block with dual residual streams (Step 8) |
+| Complete GroundUpGPT Model Class | AI Engine | *Planned* | Stacked blocks, final LayerNorm, LM head, weight tying |
 | Training Loop & LR Scheduler | AI Engine | *Planned* | AdamW, warmup, cosine decay |
 | Evaluation & Perplexity Benchmarks | AI Engine | *Planned* | Validation loss tracking |
 | Autoregressive Generation Engine | AI Engine | *Planned* | Temperature, top-$k$, top-$p$ |
@@ -83,7 +84,7 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
    - Step 6: BPE robustness (strict UTF-8, hardened load validation) & configurable data pipeline.
 2. **Phase 2: Core Transformer Architecture**
    - Step 7: Positional & token embeddings, single-head causal self-attention module. *(Implemented)*
-   - Step 8: Multi-head attention, MLP layers, LayerNorm/RMSNorm, and residual assembly into Transformer blocks. *(Planned)*
+   - Step 8: Multi-head attention, MLP layers, Pre-LayerNorm, and residual Transformer block. *(Implemented)*
    - Step 9: Full `GroundUpGPT` model class, parameter count verification (~5M), weight initialization. *(Planned)*
 3. **Phase 3: Optimization, Training & Evaluation** *(Planned)*
    - Step 10: Training pipeline with AdamW, mixed precision (`amp`), and checkpoint management.

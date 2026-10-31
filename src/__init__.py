@@ -8,7 +8,9 @@ from src.bpe_tokenizer import BPETokenizer
 from src.bigram import BigramLanguageModel
 from src.data import TextDataPipeline
 from src.embeddings import TokenPositionEmbedding
-from src.attention import CausalSelfAttentionHead
+from src.attention import CausalSelfAttentionHead, MultiHeadCausalSelfAttention
+from src.feedforward import FeedForward
+from src.transformer_block import TransformerBlock
 
 __version__ = "0.1.0"
 __all__ = [
@@ -18,4 +20,7 @@ __all__ = [
     "TextDataPipeline",
     "TokenPositionEmbedding",
     "CausalSelfAttentionHead",
+    "MultiHeadCausalSelfAttention",
+    "FeedForward",
+    "TransformerBlock",
 ]

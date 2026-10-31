@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-CUDA%20Accelerated-EE4C2C.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Step 7 Attention](https://img.shields.io/badge/Status-Step%207%20Attention-brightgreen.svg)]()
+[![Status: Step 8 Block Ready](https://img.shields.io/badge/Status-Step%208%20Block%20Ready-brightgreen.svg)]()
 
 GroundUpGPT is an educational and engineering project dedicated to designing, implementing, training, evaluating, and deploying a small autoregressive, decoder-only Transformer language model completely from scratch using Python and PyTorch.
 
@@ -31,6 +31,7 @@ GroundUpGPT is an educational and engineering project dedicated to designing, im
 - [Dataset Ingestion & Batching Pipeline](#dataset-ingestion--batching-pipeline)
 - [Byte-Level BPE Tokenizer](#byte-level-bpe-tokenizer)
 - [Token Embeddings & Causal Self-Attention](#token-embeddings--causal-self-attention)
+- [Multi-Head Attention & Transformer Block](#multi-head-attention--transformer-block)
 - [Current Implementation Status](#current-implementation-status)
 
 ---
@@ -158,15 +159,19 @@ The project follows a phased, test-driven development plan:
   - Implement single-head `CausalSelfAttentionHead` (`src/attention.py`) with explicit Q, K, V projections, scaled dot-product scores, and lower-triangular causal masking.
   - Interactive demonstration script (`scripts/attention_demo.py`) proving probability normalization and zero information leakage from future tokens.
   - Unit test suite (`tests/test_attention.py`) verifying tensor shapes, masking causality, context validation, and backprop gradients.
-- [ ] **Step 8: Multi-Head Attention, MLP & Transformer Blocks**
-  - Multi-head parallel attention projections and linear output projection.
-  - Position-wise feed-forward network (FFN / MLP) with GELU activation.
-  - Pre-LayerNorm / RMSNorm and residual stream additions into complete Transformer blocks.
-- [ ] **Step 9: Full Model Assembly & Weight Initialization**
-  - Complete `GroundUpGPT` model class (~5M target parameters).
-- [ ] **Step 10: Training Pipeline & Optimization**
+- [x] **Step 8: Multi-Head Attention, MLP & Transformer Block**
+  - Implement `MultiHeadCausalSelfAttention` (`src/attention.py`) running parallel heads with linear output projection.
+  - Implement position-wise `FeedForward` (`src/feedforward.py`) network expanding $d_{model} \to 4 \times d_{model}$ with GELU.
+  - Implement Pre-LayerNorm `TransformerBlock` (`src/transformer_block.py`) with residual addition streams ($x + \text{Attention}(\text{LN}_1(x))$, $x + \text{FFN}(\text{LN}_2(x))$).
+  - Interactive demonstration script (`scripts/transformer_block_demo.py`) verifying full-block parameter counts, shape flow, and causal leakage prevention.
+  - Unit test suite (`tests/test_transformer_block.py`) covering divisibility checks, gradient propagation, and train/eval dropout behavior.
+- [ ] **Step 9: Full GPT Model Assembly & Parameter Calibration**
+  - Complete `GroundUpGPT` model class stacking Transformer blocks with final LayerNorm and LM head.
+  - Weight tying (embeddings and LM head output projection) and initialization scaling.
+  - Model parameter count calculation and alignment with the ~5M provisional target on RTX 3050 hardware.
+- [ ] **Step 10: Training Pipeline, Optimization & Loss Benchmarks**
   - AdamW optimizer, warmup, cosine decay schedule, mixed-precision (`torch.amp`), and checkpointing.
-- [ ] **Step 11: Evaluation & Autoregressive Inference Engine**
+- [ ] **Step 11: Autoregressive Inference & Sampling Engine**
   - Text generation pipeline with temperature, top-$k$, and top-$p$ sampling.
 - [ ] **Step 12: Full-Stack Application (FastAPI, SQLite, Next.js UI)**
   - REST/SSE streaming backend and responsive ChatGPT-inspired interface.
@@ -349,6 +354,20 @@ python scripts/attention_demo.py
 
 ---
 
+## Multi-Head Attention & Transformer Block
+
+Step 8 constructs the foundational repeating building block of the GPT architecture:
+- **Multi-Head Causal Attention (`src/attention.py`)**: Runs multiple independent attention heads in parallel ($d_k = d_{model} / H$), allowing the model to jointly attend to information from different representation subspaces at different positions. Head outputs are concatenated and linearly projected back to $d_{model}$ through a learned residual projection.
+- **Position-Wise Feed-Forward Network (`src/feedforward.py`)**: A 2-layer MLP expanding the representation space ($d_{model} \to 4 \times d_{model}$) with Gaussian Error Linear Unit (GELU) activation before projecting back to $d_{model}$.
+- **Pre-LayerNorm Architecture (`src/transformer_block.py`)**: Places `nn.LayerNorm` prior to both the attention and feed-forward sublayers ($x + \text{Attention}(\text{LN}_1(x))$ and $x + \text{FFN}(\text{LN}_2(x))$), providing direct gradient highways through the residual streams to ensure stable convergence in deep models.
+
+### Running the Transformer Block Demo
+```powershell
+python scripts/transformer_block_demo.py
+```
+
+---
+
 ## Current Implementation Status
 
 - **Completed Steps**:
@@ -359,5 +378,6 @@ python scripts/attention_demo.py
   - **Step 5 — Byte-Level BPE Tokenizer**: Custom `BPETokenizer` in `src/bpe_tokenizer.py`, demo in `scripts/bpe_demo.py`, unit test suite in `tests/test_bpe_tokenizer.py`, and `TextDataPipeline` compatibility.
   - **Step 6 — BPE Robustness & Data Pipeline Configuration**: Strict UTF-8 decoding, hardened JSON schema validation, removal of early-stop limits, and explicit `bpe_vocab_size` configuration in `src/data.py`.
   - **Step 7 — Token Embeddings & Causal Self-Attention**: `TokenPositionEmbedding` in `src/embeddings.py`, single-head `CausalSelfAttentionHead` in `src/attention.py`, interactive demo in `scripts/attention_demo.py`, and unit test suite in `tests/test_attention.py`.
+  - **Step 8 — Multi-Head Attention & Transformer Block**: `MultiHeadCausalSelfAttention` in `src/attention.py`, `FeedForward` in `src/feedforward.py`, Pre-LayerNorm `TransformerBlock` in `src/transformer_block.py`, demo in `scripts/transformer_block_demo.py`, and unit test suite in `tests/test_transformer_block.py`.
 - **Pending Implementation**:
-  - *Multi-head attention mechanisms, feed-forward networks (MLP), layer normalization, residual blocks, full GPT assembly, and full-stack chat layers are pending implementation.* Development will proceed to Step 8 upon instruction.
+  - *Full model stacking class (`GroundUpGPT`), weight initialization, training loop, inference engine, and full-stack chat layers are pending implementation.* Development will proceed to Step 9 upon instruction.
