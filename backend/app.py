@@ -15,12 +15,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from backend import __version__
-from backend.config import get_settings
+from backend.config import get_settings, MODEL_PROFILES
 from backend.model_loader import model_manager
 from backend.schemas import (
     GenerateRequest,
     GenerateResponse,
     HealthResponse,
+    LoadModelRequest,
     ModelInfoResponse,
 )
 from src.generation import GenerationConfig
@@ -41,6 +42,7 @@ async def lifespan(app: FastAPI):
                 checkpoint_path=settings.checkpoint_path,
                 tokenizer_path=settings.tokenizer_path,
                 device_name=settings.device,
+                model_name=settings.model_name,
             )
         except FileNotFoundError as err:
             logger.warning(
@@ -94,6 +96,71 @@ async def get_model_info() -> ModelInfoResponse:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Model is not loaded. Please generate demo artifacts first.",
         )
+    return model_manager.model_info
+
+
+@app.get("/api/model/profiles", tags=["System"])
+async def get_model_profiles() -> dict:
+    """Return available model profiles and which one is active."""
+    from pathlib import Path
+    available = {}
+    for k, v in MODEL_PROFILES.items():
+        if k == "5m":
+            continue
+        available[k] = {
+            "name": v["model_name"],
+            "checkpoint_path": v["checkpoint_path"],
+            "tokenizer_path": v["tokenizer_path"],
+            "checkpoint_exists": Path(v["checkpoint_path"]).is_file(),
+            "tokenizer_exists": Path(v["tokenizer_path"]).is_file(),
+        }
+    return {
+        "active_model": model_manager.model_info.model_name if model_manager.model_info else None,
+        "profiles": available,
+    }
+
+
+@app.post("/api/model/load", response_model=ModelInfoResponse, tags=["System"])
+async def load_model_endpoint(req: LoadModelRequest) -> ModelInfoResponse:
+    """Dynamically load or switch active model profile at runtime."""
+    target_ckpt = req.checkpoint_path
+    target_tok = req.tokenizer_path
+    target_name = req.model_name
+
+    if req.profile:
+        prof_key = req.profile.lower().strip()
+        if prof_key not in MODEL_PROFILES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown profile '{req.profile}'. Available profiles: {list(MODEL_PROFILES.keys())}",
+            )
+        prof = MODEL_PROFILES[prof_key]
+        target_ckpt = target_ckpt or prof["checkpoint_path"]
+        target_tok = target_tok or prof["tokenizer_path"]
+        target_name = target_name or prof["model_name"]
+
+    target_ckpt = target_ckpt or settings.checkpoint_path
+    target_tok = target_tok or settings.tokenizer_path
+    target_device = req.device or settings.device
+
+    async with model_manager.lock:
+        try:
+            model_manager.load_model(
+                checkpoint_path=target_ckpt,
+                tokenizer_path=target_tok,
+                device_name=target_device,
+                model_name=target_name,
+            )
+        except FileNotFoundError as err:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err))
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to load model: {exc}",
+            )
+
+    if model_manager.model_info is None:
+        raise HTTPException(status_code=500, detail="Model info failed to initialize.")
     return model_manager.model_info
 
 

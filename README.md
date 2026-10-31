@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-CUDA%20Accelerated-EE4C2C.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Step 16 Initial 5M Model Trained](https://img.shields.io/badge/Status-Step%2016%20Initial%205M%20Model%20Trained-brightgreen.svg)]()
+[![Status: Completed (Steps 1-17)](https://img.shields.io/badge/Status-Completed%20(Steps%201--17)-brightgreen.svg)]()
 
 GroundUpGPT is an educational and engineering project dedicated to designing, implementing, training, evaluating, and deploying a small autoregressive, decoder-only Transformer language model completely from scratch using Python and PyTorch.
 
@@ -542,6 +542,59 @@ Visit `http://localhost:3000` in your browser.
 
 ---
 
+## Model Evaluation & Profile Selection
+
+Step 17 introduces a quantitative evaluation framework (`scripts/evaluate_model.py`) and dynamic multi-model profile serving across the FastAPI backend and Next.js Web UI.
+
+### 1. Comparative Model Evaluation
+
+To benchmark validation loss, perplexity ($\exp(\text{loss})$), parameter counts, generation throughput, and qualitative completions between the Step 13 demo model and the Step 16 5.05M model:
+
+```powershell
+# Run comparative evaluation on held-out validation data
+python scripts/evaluate_model.py --profile compare
+
+# Or evaluate a single profile specifically:
+python scripts/evaluate_model.py --profile 5m
+python scripts/evaluate_model.py --profile demo
+```
+
+The script produces a side-by-side terminal comparison and records machine-readable JSON metrics to `logs/evaluation_comparison.json`.
+
+#### Measured Comparative Performance
+
+| Metric | Demo Model (Step 13) | 5.05M Model (Step 16) | Notes |
+| :--- | :--- | :--- | :--- |
+| **Parameters** | 34,880 | **5,051,904** | 144x parameter scaleup |
+| **Vocabulary Size** | 280 tokens | **4,096 tokens** | Full byte-level BPE vocabulary |
+| **Context Window** | 32 tokens | **256 tokens** | 8x longer sequence context |
+| **Architecture** | 2 Layers / 4 Heads | **5 Layers / 4 Heads** | Scaled Transformer stack |
+| **Training Steps** | 15 steps | **200 steps** | 3,276,800 tokens processed |
+| **Validation Loss** | 5.3150 | **6.1029** | Evaluated on held-out test splits |
+| **Validation Perplexity** | 203.36 | **447.15** | Initial random perplexity was >4,200 |
+| **Inference Throughput** | ~1,050 tok/s | **~228 tok/s** | Real-time generation on CUDA |
+
+### 2. Model Selection in Backend and Web UI
+
+GroundUpGPT supports multiple ways to select and serve models:
+
+1. **Automatic Discovery (Default)**:
+   When `checkpoints/5m_initial/model_5m_step200.pt` exists, the backend automatically defaults to serving the trained 5.05M model. If missing, it smoothly falls back to the demo model.
+2. **Environment Variable Configuration**:
+   ```powershell
+   # Force demo profile
+   $env:GROUNDUPGPT_MODEL_PROFILE = "demo"
+   python -m backend.main
+
+   # Force 5M profile
+   $env:GROUNDUPGPT_MODEL_PROFILE = "5m"
+   python -m backend.main
+   ```
+3. **Interactive Web UI Switcher**:
+   The Web UI sidebar includes a **Model Profile** toggle button (`5.05M Model` / `Demo Model`). Clicking switches the active model dynamically via `POST /api/model/load`, updating the active parameters, context window, and tokenizer in real time without restarting the server.
+
+---
+
 ## Current Implementation Status
 
 - **Completed Steps**:
@@ -561,5 +614,5 @@ Visit `http://localhost:3000` in your browser.
   - **Step 14 — Real Language Modeling Corpus Preparation**: Reusable dataset pipeline in `src/data_prep.py` and CLI in `scripts/prepare_dataset.py`, preparing 15 classic public-domain English literary works from Project Gutenberg (5.94 MB clean text, 5.84M characters, 12 train / 3 val documents, zero-leak document-level partitioning, and complete SHA-256 manifest in `data/processed/manifest.json`).
   - **Step 15 — Production BPE Tokenizer and Token Cache**: Fitted production 4,096-vocabulary byte-level BPE tokenizer on training documents (`checkpoints/bpe_vocab4096.json`, fingerprint `4138461786ea6a199ff232b2427f3cb71c60f351afa7241f75f8196e51bdae72`), optimized O(N) linked-list/heap merge algorithm, memoized piece encoding, and pre-tokenized binary token caches in `data/cache/` (1,361,831 train tokens, 168,741 val tokens, 3.89x compression ratio, and `PretokenizedDataPipeline` with causal one-token shifts).
   - **Step 16 — Initial Training of Full 5.05M GroundUpGPT Model**: Scaled training experiment using `scripts/train_5m_gpt.py`, processing 3,276,800 tokens over 200 optimization steps (effective batch size 64, context length 256) on an NVIDIA RTX 3050 6GB Laptop GPU. Cross-entropy loss successfully decreased from 8.3522 (near theoretical random uniform baseline of ln(4096) ≈ 8.318) down to 5.8608 train / 6.1189 validation at 37,009.3 tokens/sec with peak VRAM footprint of only 744.7 MB. Saved checkpoint `checkpoints/5m_initial/model_5m_step200.pt` and documented training dynamics.
-- **Pending Implementation**:
-  - *Step 17: Model Evaluation & Seamless Web UI Selection.*
+  - **Step 17 — Model Evaluation & Seamless Web UI Selection**: Quantitative evaluation suite in `scripts/evaluate_model.py`, computing validation cross-entropy loss and perplexity ($\exp(\text{loss})$), generation throughput benchmarks, and comparative reporting between demo and 5M models. Integrated dynamic profile selection across backend (`backend/config.py`, `backend/app.py`), Next.js Web UI (`frontend/app`), and Windows launcher (`scripts/start_app.ps1`). Verified with 100% passing launcher tests (19/19) and full repository unit test suite (99/99).
+- **Roadmap Complete**: All 17 milestones implemented from first principles.

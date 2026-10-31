@@ -9,6 +9,7 @@ interface SidebarProps {
   settings: GenerationSettings;
   onUpdateSettings: (newSettings: GenerationSettings) => void;
   onClearChat: () => void;
+  onSwitchProfile?: (profile: string) => void;
   isGenerating: boolean;
   isOpen: boolean;
   onClose: () => void;
@@ -20,6 +21,7 @@ export function Sidebar({
   settings,
   onUpdateSettings,
   onClearChat,
+  onSwitchProfile,
   isGenerating,
   isOpen,
   onClose,
@@ -92,11 +94,49 @@ export function Sidebar({
             </div>
           </div>
 
+          {/* Model Profile Switcher */}
+          {modelInfo && onSwitchProfile && (
+            <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-2.5 text-xs">
+              <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                Model Profile
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 font-mono text-[11px]">
+                <button
+                  type="button"
+                  disabled={isGenerating || modelInfo.vocab_size === 4096}
+                  onClick={() => onSwitchProfile("5m")}
+                  className={`rounded px-2 py-1.5 text-center font-medium transition-colors ${
+                    modelInfo.vocab_size === 4096
+                      ? "bg-teal-600 text-white font-semibold shadow-sm cursor-default"
+                      : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                  }`}
+                >
+                  5.05M Model
+                </button>
+                <button
+                  type="button"
+                  disabled={isGenerating || modelInfo.vocab_size < 4096}
+                  onClick={() => onSwitchProfile("demo")}
+                  className={`rounded px-2 py-1.5 text-center font-medium transition-colors ${
+                    modelInfo.vocab_size < 4096
+                      ? "bg-teal-600 text-white font-semibold shadow-sm cursor-default"
+                      : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                  }`}
+                >
+                  Demo Model
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Model Architectural Specs */}
           {modelInfo && (
             <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3 text-xs text-slate-300">
-              <div className="mb-2 font-semibold uppercase tracking-wider text-slate-400">
-                Active Checkpoint
+              <div className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-slate-400">
+                <span>Active Model</span>
+                <span className="rounded border border-teal-800/60 bg-teal-950/80 px-1.5 py-0.5 font-mono text-[10px] font-medium text-teal-300">
+                  {modelInfo.profile_name || modelInfo.model_name}
+                </span>
               </div>
               <div className="space-y-1.5 font-mono text-[11px]">
                 <div className="flex justify-between">

@@ -72,6 +72,7 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
 | Real Language Modeling Corpus | AI Engine | **Implemented** | 15-book Project Gutenberg collection with zero-leak doc split (Step 14) |
 | Production BPE & Token Cache | AI Engine | **Implemented** | 4096-vocab BPE tokenizer & pre-tokenized cache with causal shifts (Step 15) |
 | Full 5M Model Training | AI Engine | **Implemented** | Bounded pretraining experiment on RTX 3050 (Step 16) |
+| Model Evaluation & UI Selection | Full-Stack | **Implemented** | Quantitative perplexity benchmarking & live Web UI profile switching (Step 17) |
 
 ---
 
@@ -88,16 +89,16 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
    - Step 7: Positional & token embeddings, single-head causal self-attention module. *(Implemented)*
    - Step 8: Multi-head attention, MLP layers, Pre-LayerNorm, and residual Transformer block. *(Implemented)*
    - Step 9: Full `GroundUpGPT` model class, exact 5,051,904 parameter calibration, weight initialization. *(Implemented)*
-3. **Phase 3: Optimization, Training & Evaluation** *(In Progress)*
+3. **Phase 3: Optimization, Training & Evaluation** *(Completed)*
    - Step 10: Training pipeline with AdamW, mixed precision (`amp`), gradient accumulation, and checkpoint management. *(Implemented)*
    - Step 11: Autoregressive text generation, greedy decoding, temperature sampling, top-$k$, top-$p$, streaming iterator, and hardened checkpoints. *(Implemented)*
    - Step 12: Local FastAPI inference backend with real-time SSE streaming, model loader, and CORS security. *(Implemented)*
-4. **Phase 4: Full-Stack Application & Real Pretraining** *(In Progress)*
+4. **Phase 4: Full-Stack Application & Real Pretraining** *(Completed)*
    - Step 13: Next.js/React frontend with streaming UI, metrics dashboard, parameter controls, and hardened Windows launchers. *(Implemented)*
    - Step 14: Real public-domain English corpus preparation (15 Project Gutenberg documents, deduplication, document-level train/validation split). *(Implemented)*
    - Step 15: Production 4096-vocab BPE tokenizer, O(N) linked-list/heap merges, and persistent pre-tokenized cache. *(Implemented)*
    - Step 16: Initial training run of full 5.05M GroundUpGPT model on RTX 3050 GPU (200 steps, 3.28M tokens, loss dropped 8.35 -> 5.86). *(Implemented)*
-   - Step 17: Model evaluation, comparison, and dynamic Web UI model selection. *(Planned)*
+   - Step 17: Model evaluation tool (`scripts/evaluate_model.py`), perplexity analysis, and dynamic UI model selection (`backend/app.py`, `frontend/app`). *(Implemented)*
 
 ---
 

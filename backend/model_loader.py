@@ -48,6 +48,7 @@ class ModelManager:
         checkpoint_path: Union[str, Path],
         tokenizer_path: Union[str, Path],
         device_name: str = "auto",
+        model_name: Optional[str] = None,
     ) -> None:
         """Load trained model and matching tokenizer strictly from local trusted artifact paths.
 
@@ -142,8 +143,18 @@ class ModelManager:
         generator = TextGenerator(model, tokenizer, device=target_device)
 
         # 7. Construct Metadata Summary
+        display_profile = model_name
+        if display_profile is None:
+            if gpt_config.vocab_size == 4096 and gpt_config.num_layers == 5:
+                display_profile = "GroundUpGPT-5M (5.05M)"
+            elif gpt_config.vocab_size <= 512 and gpt_config.num_layers <= 3:
+                display_profile = "GroundUpGPT-Demo (35K)"
+            else:
+                display_profile = f"GroundUpGPT ({model.get_num_params():,} params)"
+
         model_info = ModelInfoResponse(
             model_name="GroundUpGPT",
+            profile_name=display_profile,
             vocab_size=gpt_config.vocab_size,
             block_size=gpt_config.block_size,
             embed_dim=gpt_config.embed_dim,

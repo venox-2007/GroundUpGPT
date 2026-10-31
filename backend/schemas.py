@@ -66,6 +66,7 @@ class ModelInfoResponse(BaseModel):
     """Architectural metadata and checkpoint information for loaded model."""
 
     model_name: str
+    profile_name: Optional[str] = None
     vocab_size: int
     block_size: int
     embed_dim: int
@@ -88,3 +89,29 @@ class HealthResponse(BaseModel):
     model_loaded: bool
     device: str
     version: str
+
+
+class LoadModelRequest(BaseModel):
+    """Parameters for dynamically loading or switching model profiles."""
+
+    profile: Optional[str] = Field(
+        default=None,
+        description="Target profile key ('demo', '5m', or '5m_initial').",
+    )
+    checkpoint_path: Optional[str] = Field(
+        default=None,
+        description="Optional custom path to model checkpoint .pt file.",
+    )
+    tokenizer_path: Optional[str] = Field(
+        default=None,
+        description="Optional custom path to tokenizer JSON file.",
+    )
+    device: Optional[str] = Field(
+        default=None,
+        description="Target execution device ('auto', 'cuda', 'cpu').",
+    )
+    model_name: Optional[str] = Field(
+        default=None,
+        description="Optional display name for the model.",
+    )
+

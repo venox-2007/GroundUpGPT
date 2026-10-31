@@ -77,13 +77,20 @@ if (-not $npmPath) {
 }
 
 # 3. Check for Model Artifacts
-# Verify BOTH demo_checkpoint.pt and demo_tokenizer.json exist before declaring the model ready.
+# Verify demo and trained 5M artifacts.
 # Do not automatically retrain.
 $ckptPath = Join-Path $root 'checkpoints\demo_checkpoint.pt'
 $tokPath = Join-Path $root 'checkpoints\demo_tokenizer.json'
+$ckpt5mPath = Join-Path $root 'checkpoints\5m_initial\model_5m_step200.pt'
+$tok5mPath = Join-Path $root 'checkpoints\bpe_vocab4096.json'
 
 $hasCkpt = Test-Path $ckptPath
 $hasTok = Test-Path $tokPath
+$has5m = (Test-Path $ckpt5mPath) -and (Test-Path $tok5mPath)
+
+if ($has5m) {
+    Write-Host '[*] Verified trained 5.05M model checkpoint and tokenizer artifacts.' -ForegroundColor Green
+}
 
 if (-not ($hasCkpt -and $hasTok)) {
     Write-Host '[NOTICE] Required demo model artifacts are missing:' -ForegroundColor Yellow

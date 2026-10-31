@@ -22,6 +22,7 @@ export interface ChatMessage {
 
 export interface ModelInfo {
   model_name: string;
+  profile_name?: string | null;
   vocab_size: number;
   block_size: number;
   embed_dim: number;

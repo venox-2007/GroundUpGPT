@@ -209,6 +209,22 @@ export default function ChatPage() {
     setMessages([]);
   };
 
+  const handleSwitchProfile = async (profile: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/model/load`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile }),
+      });
+      if (res.ok) {
+        const info = await res.json();
+        setModelInfo(info);
+      }
+    } catch (err) {
+      console.error("Failed to switch model profile:", err);
+    }
+  };
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-slate-950 text-slate-100">
       {/* Sidebar Navigation */}
@@ -218,6 +234,7 @@ export default function ChatPage() {
         settings={settings}
         onUpdateSettings={setSettings}
         onClearChat={handleClearChat}
+        onSwitchProfile={handleSwitchProfile}
         isGenerating={isGenerating}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -240,7 +257,7 @@ export default function ChatPage() {
                 GroundUpGPT
               </span>
               <span className="rounded bg-teal-950 px-2 py-0.5 text-[10px] font-mono font-medium text-teal-400 border border-teal-800">
-                v0.1.0 • Step 13
+                Step 17 • Active
               </span>
             </div>
           </div>
