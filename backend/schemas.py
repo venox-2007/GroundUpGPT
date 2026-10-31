@@ -92,26 +92,16 @@ class HealthResponse(BaseModel):
 
 
 class LoadModelRequest(BaseModel):
-    """Parameters for dynamically loading or switching model profiles."""
+    """Parameters for dynamically switching model profiles strictly among trusted predefined profiles."""
 
-    profile: Optional[str] = Field(
-        default=None,
-        description="Target profile key ('demo', '5m', or '5m_initial').",
+    profile: str = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        description="Target trusted model profile key ('demo', '5m', or '5m_initial').",
     )
-    checkpoint_path: Optional[str] = Field(
-        default=None,
-        description="Optional custom path to model checkpoint .pt file.",
-    )
-    tokenizer_path: Optional[str] = Field(
-        default=None,
-        description="Optional custom path to tokenizer JSON file.",
-    )
-    device: Optional[str] = Field(
-        default=None,
-        description="Target execution device ('auto', 'cuda', 'cpu').",
-    )
-    model_name: Optional[str] = Field(
-        default=None,
-        description="Optional display name for the model.",
-    )
+
+    model_config = {
+        "extra": "forbid"
+    }
 

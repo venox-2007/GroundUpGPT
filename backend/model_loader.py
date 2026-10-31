@@ -84,7 +84,6 @@ class ModelManager:
             target_device = "cuda" if torch.cuda.is_available() else "cpu"
         else:
             target_device = device_name
-        self.device_name = target_device
 
         logger.info(f"Loading checkpoint from '{ckpt_path}' onto {target_device}...")
 
@@ -170,11 +169,12 @@ class ModelManager:
             checkpoint_val_loss=checkpoint.get("val_loss"),
         )
 
-        # 8. Atomically assign loaded components
+        # 8. Atomically assign loaded components only after all validations pass
         self.model = model
         self.tokenizer = tokenizer
         self.generator = generator
         self.model_info = model_info
+        self.device_name = target_device
         self._is_loaded = True
         logger.info(
             f"Successfully initialized GroundUpGPT ({model.get_num_params():,} parameters) "

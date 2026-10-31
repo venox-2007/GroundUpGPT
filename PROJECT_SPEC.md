@@ -99,6 +99,11 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
    - Step 15: Production 4096-vocab BPE tokenizer, O(N) linked-list/heap merges, and persistent pre-tokenized cache. *(Implemented)*
    - Step 16: Initial training run of full 5.05M GroundUpGPT model on RTX 3050 GPU (200 steps, 3.28M tokens, loss dropped 8.35 -> 5.86). *(Implemented)*
    - Step 17: Model evaluation tool (`scripts/evaluate_model.py`), perplexity analysis, and dynamic UI model selection (`backend/app.py`, `frontend/app`). *(Implemented)*
+5. **Phase 5: Reliability, Continued Pretraining & Checkpoint Lifecycle** *(In Progress)*
+   - Step 18: Inference safety and stability (trusted profile switching, bounded backpressure queue, lock coordination on cancellation). *(Implemented)*
+   - Step 19: Reproducible language model evaluation benchmark with deterministic sampling and metadata integrity. *(Planned)*
+   - Step 20: Continued pretraining from Step 200 with monitored checkpoints and lr-schedule resumption. *(Planned)*
+   - Step 21: Best-checkpoint discovery, UI integration, and end-to-end full test suite verification. *(Planned)*
 
 ---
 

@@ -40,6 +40,16 @@ def resolve_default_profile() -> str:
     return "demo"
 
 
+def get_trusted_profile(profile_name: str) -> Optional[Dict[str, Any]]:
+    """Retrieve trusted profile dictionary by key, or None if untrusted/unknown."""
+    return MODEL_PROFILES.get(profile_name.lower().strip())
+
+
+def register_trusted_profile(key: str, profile_dict: Dict[str, Any]) -> None:
+    """Register a trusted profile on the server side (for testing or server configuration)."""
+    MODEL_PROFILES[key.lower().strip()] = profile_dict
+
+
 def resolve_profile_paths(profile_name: str) -> Dict[str, str]:
     """Retrieve checkpoint, tokenizer, and display name for a given profile."""
     prof = MODEL_PROFILES.get(profile_name, MODEL_PROFILES["demo"])
