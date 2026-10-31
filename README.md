@@ -17,6 +17,7 @@ GroundUpGPT is an educational and engineering project dedicated to designing, im
 ## Table of Contents
 
 - [Project Overview](#project-overview)
+- [Project Blueprint & Specification](#project-blueprint--specification)
 - [Learning & Engineering Objectives](#learning--engineering-objectives)
 - [Hardware Target & Constraints](#hardware-target--constraints)
 - [Planned Architecture](#planned-architecture)
@@ -25,6 +26,8 @@ GroundUpGPT is an educational and engineering project dedicated to designing, im
 - [Repository Structure](#repository-structure)
 - [Windows Environment Setup](#windows-environment-setup)
 - [Running Environment Verification](#running-environment-verification)
+- [Character-Level Tokenizer](#character-level-tokenizer)
+- [Bigram Language Model Baseline](#bigram-language-model-baseline)
 - [Current Implementation Status](#current-implementation-status)
 
 ---
@@ -37,6 +40,14 @@ By implementing each operation explicitly:
 - We explore the exact linear algebra and probability mechanics governing token generation.
 - We observe the dynamics of training loss, gradient flow, learning rate schedules, and cross-entropy optimization.
 - We establish a transparent, mathematically sound codebase suitable for technical interviews, machine learning portfolios, and advanced study.
+
+---
+
+## Project Blueprint & Specification
+
+For a comprehensive, end-to-end design blueprint outlining the long-term vision—including the future full-stack chat application (FastAPI, SQLite, Next.js/React, TypeScript, Tailwind CSS), evaluation framework, and memory systems—consult:
+
+👉 **[PROJECT_SPEC.md](PROJECT_SPEC.md)**: Full architecture specifications, phased milestones, hardware boundaries, and verification standards.
 
 ---
 
@@ -116,28 +127,28 @@ The project follows a phased, test-driven development plan:
   - Establish clean directory structure, `.gitignore`, and configuration roots.
   - Implement and validate automated hardware/environment diagnostic script.
   - Document architectural plan, constraints, and Windows setup guidelines.
-- [x] **Step 2: Custom Tokenization & Data Pipeline** *(Character-Level Tokenizer Completed)*
+- [x] **Step 2: Character-Level Tokenizer**
   - Implement educational character-level tokenizer from scratch (`src/tokenizer.py`).
   - Deterministic sorted vocabulary, `stoi`/`itos` mappings, and input validation.
-  - Interactive demonstration script and unit test suite.
-- [ ] **Step 3: Core Transformer Architectural Blocks**
+  - Interactive demonstration script and unit test suite. *(Note: full dataset ingestion and BPE tokenization will occur in upcoming data pipeline steps).*
+- [x] **Step 3: Trainable Bigram Model & Project Blueprint**
+  - Document comprehensive long-term blueprint in `PROJECT_SPEC.md`.
+  - Implement baseline `BigramLanguageModel` (`src/bigram.py`) with lookup table and cross-entropy loss.
+  - Implement AdamW training loop demo (`scripts/train_bigram_demo.py`) and targeted test suite (`tests/test_bigram.py`).
+- [ ] **Step 4: Data Ingestion & Batching Pipeline**
+  - Dataset acquisition, ingestion, and chunked batch DataLoader with causal sequence shifting.
+- [ ] **Step 5: Core Transformer Architectural Blocks**
   - Positional embeddings and token embeddings.
   - Causal multi-head self-attention module with triangular masking.
   - Position-wise feed-forward network (FFN) and residual normalization blocks.
-  - Comprehensive unit testing for tensor shapes and causality.
-- [ ] **Step 4: Full Model Assembly & Weight Initialization**
-  - Complete `GroundUpGPT` model class.
-  - Parameter scaling verification (~5M target) and memory profiling.
-  - Standardized weight initialization (Gaussian scaling).
-- [ ] **Step 5: Training Pipeline & Optimization**
-  - Cross-entropy loss formulation and perplexity calculation.
-  - AdamW optimizer with warmup and cosine decay learning rate schedule.
-  - Mixed-precision training (`torch.cuda.amp`) and gradient clipping.
-  - Checkpoint saving and resumption mechanics.
-- [ ] **Step 6: Evaluation & Autoregressive Inference**
+- [ ] **Step 6: Full Model Assembly & Weight Initialization**
+  - Complete `GroundUpGPT` model class (~5M target parameters).
+- [ ] **Step 7: Training Pipeline & Optimization**
+  - AdamW optimizer, warmup, cosine decay schedule, mixed-precision (`torch.amp`), and checkpointing.
+- [ ] **Step 8: Evaluation & Autoregressive Inference Engine**
   - Text generation pipeline with temperature, top-$k$, and top-$p$ sampling.
-  - Validation loss and perplexity evaluation benchmarks.
-- [ ] **Step 7: Packaging, Profiling & Portfolio Polish**
+- [ ] **Step 9: Full-Stack Application (FastAPI, SQLite, Next.js UI)**
+  - REST/SSE streaming backend and responsive ChatGPT-inspired interface.
   - Final documentation, benchmark summaries, and sample generation logs.
 
 ---
@@ -253,10 +264,26 @@ python scripts/tokenizer_demo.py
 
 ---
 
+## Bigram Language Model Baseline
+
+The Bigram model (`src/bigram.py`) serves as the fundamental baseline for autoregressive sequence modeling:
+- **Concept**: Next-token probabilities are conditioned exclusively on the current token ($P(w_t \mid w_{t-1})$) without multi-step history or attention.
+- **Learnable Embedding Table**: Utilizes an `nn.Embedding(vocab_size, vocab_size)` lookup table where row $i$ represents unnormalized logits over the vocabulary for token $i$.
+- **Loss & Backpropagation**: Computes PyTorch cross-entropy loss against target token sequences shifted by 1 position.
+- **Autoregressive Generation**: Employs multinomial sampling (`torch.multinomial`) over temperature-scaled softmax distributions.
+
+### Running the Bigram Training Demo
+```powershell
+python scripts/train_bigram_demo.py
+```
+
+---
+
 ## Current Implementation Status
 
 - **Completed Steps**:
   - **Step 1 — Project Initialization**: Repository structure, Git ignore rules, CUDA hardware verification (`scripts/check_environment.py`).
   - **Step 2 — Character-Level Tokenizer**: Custom `CharTokenizer` in `src/tokenizer.py`, demo in `scripts/tokenizer_demo.py`, test coverage in `tests/test_tokenizer.py`.
+  - **Step 3 — Bigram Model & Project Blueprint**: Project blueprint (`PROJECT_SPEC.md`), trainable `BigramLanguageModel` in `src/bigram.py`, training demo in `scripts/train_bigram_demo.py`, and unit test suite in `tests/test_bigram.py`.
 - **Pending Implementation**:
-  - *No embeddings, neural network layers, training loops, or inference engines have been implemented yet.* Development will proceed to Step 3 upon instruction.
+  - *Data pipeline, BPE tokenizer, Transformer attention blocks, and full-stack chat layers have not yet been implemented.* Development will proceed to Step 4 upon instruction.
