@@ -112,14 +112,14 @@ The planned baseline configuration is a compact, decoder-only Transformer modele
 
 The project follows a phased, test-driven development plan:
 
-- [x] **Step 1: Project Initialization & Environment Verification** *(Current Step)*
+- [x] **Step 1: Project Initialization & Environment Verification**
   - Establish clean directory structure, `.gitignore`, and configuration roots.
   - Implement and validate automated hardware/environment diagnostic script.
   - Document architectural plan, constraints, and Windows setup guidelines.
-- [ ] **Step 2: Custom Tokenization & Data Pipeline**
-  - Dataset acquisition, ingestion, and preprocessing.
-  - Tokenizer training/implementation and vocab serialization.
-  - Efficient PyTorch `Dataset` and `DataLoader` with causal sequence chunking.
+- [x] **Step 2: Custom Tokenization & Data Pipeline** *(Character-Level Tokenizer Completed)*
+  - Implement educational character-level tokenizer from scratch (`src/tokenizer.py`).
+  - Deterministic sorted vocabulary, `stoi`/`itos` mappings, and input validation.
+  - Interactive demonstration script and unit test suite.
 - [ ] **Step 3: Core Transformer Architectural Blocks**
   - Positional embeddings and token embeddings.
   - Causal multi-head self-attention module with triangular masking.
@@ -239,12 +239,24 @@ python scripts/check_environment.py
 
 ---
 
+## Character-Level Tokenizer
+
+The project features a deterministic, educational `CharTokenizer` implemented purely in standard Python (`src/tokenizer.py`):
+- **Deterministic Vocabulary**: Extracts unique characters from the training text and sorts them deterministically.
+- **Bi-directional Mappings**: Maintains human-readable `stoi` (string-to-index) and `itos` (index-to-string) dictionaries.
+- **Input Validation**: Raises informative `ValueError` exceptions for empty training corpora, unseen characters during encoding, and out-of-range IDs during decoding.
+
+### Running the Tokenizer Demo
+```powershell
+python scripts/tokenizer_demo.py
+```
+
+---
+
 ## Current Implementation Status
 
-- **Completed Step**: **Step 1 — Project Initialization**
-- **Artifacts Established**:
-  - Full project structure and clean `.gitignore` protecting environments, weights, and data.
-  - Environment diagnostic script (`scripts/check_environment.py`).
-  - Architecture plan and Windows setup documentation.
+- **Completed Steps**:
+  - **Step 1 — Project Initialization**: Repository structure, Git ignore rules, CUDA hardware verification (`scripts/check_environment.py`).
+  - **Step 2 — Character-Level Tokenizer**: Custom `CharTokenizer` in `src/tokenizer.py`, demo in `scripts/tokenizer_demo.py`, test coverage in `tests/test_tokenizer.py`.
 - **Pending Implementation**:
-  - *No tokenization, model weights, or training routines have been created yet.* Development will proceed to Step 2 upon instruction.
+  - *No embeddings, neural network layers, training loops, or inference engines have been implemented yet.* Development will proceed to Step 3 upon instruction.
