@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 import json
 import logging
+import threading
 import time
 from typing import AsyncIterator
 
@@ -113,9 +115,13 @@ async def generate_text(request: GenerateRequest) -> GenerateResponse:
     )
 
     try:
-        # Concurrency safety: serialize GPU access for local single-user inference
+        # Offload synchronous PyTorch inference to worker thread while holding model lock
         async with model_manager.lock:
-            result = model_manager.generator.generate(prompt=request.prompt, config=config)
+            result = await asyncio.to_thread(
+                model_manager.generator.generate,
+                prompt=request.prompt,
+                config=config,
+            )
 
         return GenerateResponse(
             prompt=result.prompt,
@@ -170,28 +176,61 @@ async def generate_text_stream(
 
         generated_tokens_count = 0
         start_time = time.perf_counter()
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        cancel_event = threading.Event()
+
+        def inference_worker() -> None:
+            """Run synchronous token generation in a dedicated thread to unblock event loop."""
+            try:
+                assert model_manager.generator is not None
+                for chunk in model_manager.generator.generate_stream(
+                    prompt=request.prompt, config=config
+                ):
+                    if cancel_event.is_set():
+                        break
+                    loop.call_soon_threadsafe(queue.put_nowait, ("token", chunk))
+                loop.call_soon_threadsafe(queue.put_nowait, ("done", None))
+            except Exception as exc:
+                loop.call_soon_threadsafe(queue.put_nowait, ("error", exc))
 
         try:
             # Concurrency safety: acquire lock for duration of streaming job
             async with model_manager.lock:
-                for chunk in model_manager.generator.generate_stream(
-                    prompt=request.prompt, config=config
-                ):
-                    # Check for early client disconnection
-                    if await raw_request.is_disconnected():
-                        logger.info("Client disconnected during stream. Halting generation.")
-                        break
+                worker_thread = threading.Thread(target=inference_worker, daemon=True)
+                worker_thread.start()
 
-                    generated_tokens_count += 1
-                    token_payload = json.dumps(
-                        {
-                            "token_id": chunk.token_id,
-                            "text": chunk.text_chunk,
-                            "step": chunk.step,
-                            "generated_tokens": generated_tokens_count,
-                        }
-                    )
-                    yield f"event: token\ndata: {token_payload}\n\n"
+                try:
+                    while True:
+                        if await raw_request.is_disconnected():
+                            logger.info("Client disconnected during stream. Halting generation.")
+                            cancel_event.set()
+                            break
+
+                        try:
+                            msg_type, payload = await asyncio.wait_for(queue.get(), timeout=0.05)
+                        except asyncio.TimeoutError:
+                            continue
+
+                        if msg_type == "token":
+                            chunk = payload
+                            generated_tokens_count += 1
+                            token_payload = json.dumps(
+                                {
+                                    "token_id": chunk.token_id,
+                                    "text": chunk.text_chunk,
+                                    "step": chunk.step,
+                                    "generated_tokens": generated_tokens_count,
+                                }
+                            )
+                            yield f"event: token\ndata: {token_payload}\n\n"
+                        elif msg_type == "done":
+                            break
+                        elif msg_type == "error":
+                            raise payload  # Handled by outer try-except
+                finally:
+                    cancel_event.set()
+                    worker_thread.join(timeout=1.0)
 
             # Compute accurate final token metrics
             elapsed_time = time.perf_counter() - start_time

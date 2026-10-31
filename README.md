@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-CUDA%20Accelerated-EE4C2C.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Step 12 Backend Ready](https://img.shields.io/badge/Status-Step%2012%20Backend%20Ready-brightgreen.svg)]()
+[![Status: Step 13 Web Chat Ready](https://img.shields.io/badge/Status-Step%2013%20Web%20Chat%20Ready-brightgreen.svg)]()
 
 GroundUpGPT is an educational and engineering project dedicated to designing, implementing, training, evaluating, and deploying a small autoregressive, decoder-only Transformer language model completely from scratch using Python and PyTorch.
 
@@ -36,6 +36,7 @@ GroundUpGPT is an educational and engineering project dedicated to designing, im
 - [GPU Training Infrastructure & Optimizer](#gpu-training-infrastructure--optimizer)
 - [Autoregressive Text Generation & Streaming Engine](#autoregressive-text-generation--streaming-engine)
 - [Local FastAPI Inference Backend & SSE Streaming](#local-fastapi-inference-backend--sse-streaming)
+- [Web Chat Interface (Next.js & Tailwind)](#web-chat-interface-nextjs--tailwind)
 - [Current Implementation Status](#current-implementation-status)
 
 ---
@@ -197,7 +198,14 @@ The project follows a phased, test-driven development plan:
   - Inference-only `ModelManager` loading model once at startup, validating tokenizer fingerprint, and serializing execution via `asyncio.Lock`.
   - Real-time Server-Sent Events (SSE) with `token`, `done`, and `error` events and graceful client disconnect handling.
   - Secure local CORS configuration, configurable environment settings (`.env.example`), and targeted test suite (`tests/test_api.py`).
-- [ ] **Step 13: Web Chat Frontend (Next.js & Tailwind)**
+- [x] **Step 13: Web Chat Frontend (Next.js & Tailwind)**
+  - Responsive ChatGPT-inspired web interface built with Next.js App Router, React, TypeScript, and Tailwind CSS (`frontend/`).
+  - Real-time Server-Sent Events (SSE) streaming client using `ReadableStream` with robust chunk boundary parsing.
+  - Interactive generation controls: real-time `Stop` button via `AbortController` (preserving partial outputs) and `Regenerate`.
+  - Live execution telemetry: generated tokens, generation speed (`tok/s`), elapsed time, active context tokens, and context-cropped indicator.
+  - In-sidebar sampling controls: temperature, nucleus top-$p$, top-$k$, max new tokens, and random seed.
+  - Session chat management: clear conversation and keyboard shortcuts (Enter to send, Shift+Enter for newline).
+- [ ] **Step 14: Persistent Storage & SQLite Conversation History**
 
 ---
 
@@ -489,6 +497,51 @@ uvicorn backend.app:app --host 127.0.0.1 --port 8000
 
 ---
 
+## Web Chat Interface (Next.js & Tailwind)
+
+Step 13 delivers a clean, responsive web chat interface built with modern Next.js 14 (App Router), React 18, TypeScript, and Tailwind CSS (`frontend/`):
+- **User Interface Features**:
+  - **ChatGPT-Inspired Layout**: Dark-themed slate palette with teal accents, responsive collapsible sidebar, and clean typography.
+  - **Sidebar Telemetry & Status**: Live connection indicator, parameter counts, context window limit, device (`CUDA`/`CPU`), and checkpoint metadata.
+  - **Interactive Hyperparameter Tuning**: In-sidebar controls for `temperature` (0.00 to 2.00), nucleus `top_p` (0.10 to 1.00), `top_k`, `max_new_tokens` (5 to 128), and optional random `seed`.
+  - **Real-Time Token Streaming**: Consumes `/api/generate/stream` SSE events with boundary-safe chunk reassembly, rendering live token deltas and animated cursor.
+  - **Interactive Controls**: Dedicated `Stop` generation button (powered by `AbortController`, safely preserving received text) and `Regenerate response`.
+  - **Telemetry Badges**: Displays genuine backend metrics on completions: generated tokens, generation throughput (`tok/s`), elapsed latency, active context window, and a warning badge if the prompt exceeded `block_size` and was cropped.
+  - **Session Management**: Local React state message history with `Clear Conversation` capability.
+  - **Honest Educational Notice**: Explicitly identifies the underlying model as a lightweight educational prototype predicting raw token completions, with no claims of multi-turn conversational reasoning.
+
+### One-Click Launchers (Windows)
+
+GroundUpGPT includes root batch launchers for instant local startup:
+
+- **`Start GroundUpGPT.bat`**:
+  - Double-click from Windows Explorer (handles paths with spaces and OneDrive directories).
+  - Verifies Python virtual environment and Node.js availability.
+  - Checks if services are already running to prevent duplicate processes.
+  - Automatically installs missing frontend dependencies on first run.
+  - Offers to generate lightweight demo artifacts if missing (never retrains on normal startup).
+  - Starts FastAPI backend (`127.0.0.1:8000`) and Next.js frontend (`localhost:3000`) in separate console windows with live logs.
+  - Waits for health checks to pass, then automatically opens `http://localhost:3000` in your default browser.
+- **`Stop GroundUpGPT.bat`**:
+  - Safely terminates only GroundUpGPT backend and frontend processes listening on ports 8000 and 3000 without affecting unrelated Python or Node.js applications.
+
+### Manual Startup (PowerShell)
+
+Alternatively, open two separate Windows PowerShell windows:
+
+```powershell
+# Window 1: Start Backend (Port 8000)
+python -m backend.main
+
+# Window 2: Start Frontend (Port 3000)
+cd frontend
+npm.cmd run dev
+```
+
+Visit `http://localhost:3000` in your browser.
+
+---
+
 ## Current Implementation Status
 
 - **Completed Steps**:
@@ -504,5 +557,8 @@ uvicorn backend.app:app --host 127.0.0.1 --port 8000
   - **Step 10 — GPU Training Infrastructure**: `Trainer` and `TrainingConfig` in `src/trainer.py`, AdamW optimizer with selective weight decay, cosine decay LR schedule with linear warmup, AMP float16 support, gradient accumulation, gradient norm clipping, architecture-checked checkpointing, smoke demo in `scripts/train_gpt.py`, and test suite in `tests/test_trainer.py`.
   - **Step 11 — Autoregressive Text Generation**: `TextGenerator` and `GenerationConfig` in `src/generation.py`, greedy decoding, temperature scaling, top-$k$, nucleus top-$p$, streaming iterator, resilient byte-level boundary decoding, checkpoint RNG/fingerprint hardening, demo in `scripts/generate_demo.py`, and test suite in `tests/test_generation.py`.
   - **Step 12 — Local FastAPI Inference Backend**: Modular `backend/` package, `GET /api/health`, `GET /api/model/info`, `POST /api/generate`, `POST /api/generate/stream`, Server-Sent Events, Pydantic v2 schemas, model startup loader, concurrency locking, and test suite in `tests/test_api.py`.
+  - **Step 13 — Web Chat Frontend**: Modern Next.js 14 App Router, React 18, TypeScript, and Tailwind CSS chat application in `frontend/`, real-time SSE streaming with `AbortController` cancellation, live token metrics, in-sidebar sampling controls, and responsive desktop/mobile interface.
 - **Pending Implementation**:
-  - *Web chat frontend (Step 13): Responsive Next.js / Tailwind ChatGPT-inspired interface, SQLite conversation thread persistence, and experimental memory controls.* Development will proceed to Step 13 upon instruction.
+  - *Persistent storage (Step 14): SQLite schema and persistence for chat history and runtime settings.*
+  - *Evaluation benchmarks (Step 15): Cross-entropy loss tracking, validation loss curves, and perplexity analysis.*
+  - *Portfolio packaging (Step 16): Final deployment guide and demo videos.*

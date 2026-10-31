@@ -51,3 +51,9 @@ Thumbs.db
 scratch/
 .env
 .env.local
+.groundupgpt_pids
+
+# Frontend Node & Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/.env*.local

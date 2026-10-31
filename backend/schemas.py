@@ -3,6 +3,10 @@
 from typing import Optional
 from pydantic import BaseModel, Field
 
+from backend.config import get_settings
+
+_settings = get_settings()
+
 
 class GenerateRequest(BaseModel):
     """Parameters for autoregressive text generation."""
@@ -10,13 +14,13 @@ class GenerateRequest(BaseModel):
     prompt: str = Field(
         ...,
         min_length=1,
-        max_length=2048,
+        max_length=_settings.max_prompt_chars,
         description="Input text prompt to condition autoregressive generation.",
     )
     max_new_tokens: int = Field(
         default=50,
         ge=1,
-        le=512,
+        le=_settings.max_new_tokens_limit,
         description="Maximum number of new tokens to generate past prompt.",
     )
     temperature: float = Field(

@@ -131,6 +131,13 @@ class ModelManager:
                 f"loaded tokenizer produced {curr_fp[:16]}..."
             )
 
+        # Ensure model vocab_size exactly matches loaded tokenizer's vocabulary size
+        if gpt_config.vocab_size != tokenizer.vocab_size:
+            raise ValueError(
+                f"Model architecture vocab_size ({gpt_config.vocab_size}) does not match "
+                f"loaded tokenizer vocabulary size ({tokenizer.vocab_size})."
+            )
+
         # 6. Initialize TextGenerator Engine
         generator = TextGenerator(model, tokenizer, device=target_device)
 
