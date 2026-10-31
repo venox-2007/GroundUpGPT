@@ -19,11 +19,15 @@ from src.data import TextDataPipeline
 from src.trainer import Trainer, TrainingConfig
 
 
-def run_smoke_test() -> None:
+def run_smoke_test(device: str = "auto", steps: int = 10) -> None:
     """Execute a lightweight offline training and checkpoint resumption smoke test."""
     print("=" * 65)
     print(" GroundUpGPT - GPU Training Pipeline Smoke Test")
     print("=" * 65)
+
+    if steps < 2:
+        steps = 2
+    phase1_steps = steps // 2
 
     torch.manual_seed(42)
 
@@ -49,25 +53,25 @@ def run_smoke_test() -> None:
     print(f"    Embed Dim: {model_cfg.embed_dim}, Heads: {model_cfg.num_heads}, Layers: {model_cfg.num_layers}")
     print(f"    Unique Parameters: {model.get_num_params():,}")
 
-    # 3. Training Phase 1: Run 5 steps and save checkpoint
+    # 3. Training Phase 1: Run phase1_steps and save checkpoint
     checkpoint_path = REPO_ROOT / "checkpoints" / "smoke_checkpoint.pt"
     train_cfg_phase1 = TrainingConfig(
-        max_steps=5,
+        max_steps=phase1_steps,
         batch_size=2,
         block_size=16,
         learning_rate=1e-3,
         min_lr=1e-4,
-        warmup_steps=2,
+        warmup_steps=max(1, phase1_steps // 2),
         grad_accum_steps=2,
-        eval_interval=5,
+        eval_interval=max(1, phase1_steps),
         eval_iters=2,
-        device="auto",
+        device=device,
         checkpoint_dir=str(checkpoint_path.parent),
         seed=42,
     )
 
     trainer1 = Trainer(model=model, pipeline=pipeline, config=train_cfg_phase1)
-    print(f"\n[3] Training Phase 1 (Initial 5 Steps):")
+    print(f"\n[3] Training Phase 1 (Initial {phase1_steps} Steps on {device}):")
     metrics_p1 = trainer1.train()
     print(f"    Completed Steps: {metrics_p1['total_steps']}")
     print(f"    Phase 1 Val Loss: {metrics_p1['final_val_loss']:.4f}")
@@ -76,21 +80,21 @@ def run_smoke_test() -> None:
     trainer1.save_checkpoint(checkpoint_path, val_loss=metrics_p1["final_val_loss"])
     print(f"    Saved checkpoint to: {checkpoint_path.relative_to(REPO_ROOT)}")
 
-    # 4. Training Phase 2: Resume from checkpoint and train 5 additional steps
-    print(f"\n[4] Training Phase 2 (Resuming from Step {trainer1.current_step}):")
+    # 4. Training Phase 2: Resume from checkpoint and train remaining steps
+    print(f"\n[4] Training Phase 2 (Resuming from Step {trainer1.current_step} to {steps}):")
     # Fresh model instance with identical configuration to prove state restoration
     resumed_model = GroundUpGPT(model_cfg)
     train_cfg_phase2 = TrainingConfig(
-        max_steps=10,  # Continue up to step 10
+        max_steps=steps,  # Continue up to steps
         batch_size=2,
         block_size=16,
         learning_rate=1e-3,
         min_lr=1e-4,
-        warmup_steps=2,
+        warmup_steps=max(1, phase1_steps // 2),
         grad_accum_steps=2,
-        eval_interval=5,
+        eval_interval=max(1, steps - phase1_steps),
         eval_iters=2,
-        device="auto",
+        device=device,
         checkpoint_dir=str(checkpoint_path.parent),
         seed=42,
     )
@@ -98,7 +102,7 @@ def run_smoke_test() -> None:
 
     resumed_step = trainer2.load_checkpoint(checkpoint_path)
     print(f"    Restored Step Counter: {resumed_step}")
-    assert resumed_step == 5, f"Expected step 5, got {resumed_step}"
+    assert resumed_step == phase1_steps, f"Expected step {phase1_steps}, got {resumed_step}"
 
     metrics_p2 = trainer2.train()
     print(f"    Completed Steps: {metrics_p2['total_steps']}")
@@ -122,7 +126,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.smoke_test:
-        run_smoke_test()
+        run_smoke_test(device=args.device, steps=args.steps)
 
 
 if __name__ == "__main__":

@@ -13,6 +13,14 @@ from src.feedforward import FeedForward
 from src.transformer_block import TransformerBlock
 from src.model import GPTConfig, GroundUpGPT
 from src.trainer import Trainer, TrainingConfig
+from src.generation import (
+    GenerationConfig,
+    GenerationResult,
+    StreamChunk,
+    TextGenerator,
+    sample_next_token,
+    decode_token_sequence,
+)
 
 __version__ = "0.1.0"
 __all__ = [
@@ -29,4 +37,10 @@ __all__ = [
     "GroundUpGPT",
     "Trainer",
     "TrainingConfig",
+    "GenerationConfig",
+    "GenerationResult",
+    "StreamChunk",
+    "TextGenerator",
+    "sample_next_token",
+    "decode_token_sequence",
 ]

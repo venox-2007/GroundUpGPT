@@ -155,3 +155,146 @@ def test_checkpoint_rejection_on_configuration_mismatch(tmp_path: Path, sample_f
 
     with pytest.raises(ValueError, match="Tokenizer type mismatch"):
         trainer_bpe.load_checkpoint(ckpt_file)
+
+
+def test_uninterrupted_vs_resumed_training_reproducibility(tmp_path: Path, sample_fixture_path: Path) -> None:
+    """CPU regression test verifying uninterrupted vs checkpoint-resumed training yields identical weights."""
+    import copy
+
+    torch.manual_seed(42)
+    pipeline = TextDataPipeline.from_file(sample_fixture_path, train_ratio=0.9)
+    model_cfg = GPTConfig(
+        vocab_size=pipeline.vocab_size,
+        block_size=8,
+        embed_dim=16,
+        num_heads=2,
+        num_layers=2,
+        bias=False,
+        weight_tying=True,
+    )
+
+    # 1. Base initialization weights shared across all runs
+    base_model = GroundUpGPT(model_cfg)
+    initial_weights = copy.deepcopy(base_model.state_dict())
+
+    # 2. Uninterrupted Run: 6 steps on CPU
+    m_uninterrupted = GroundUpGPT(model_cfg)
+    m_uninterrupted.load_state_dict(copy.deepcopy(initial_weights))
+
+    cfg_uninterrupted = TrainingConfig(
+        max_steps=6,
+        batch_size=2,
+        block_size=8,
+        learning_rate=1e-3,
+        min_lr=1e-4,
+        warmup_steps=2,
+        device="cpu",
+        seed=42,
+    )
+    t_uninterrupted = Trainer(m_uninterrupted, pipeline, cfg_uninterrupted)
+    for _ in range(6):
+        t_uninterrupted.train_step()
+
+    assert t_uninterrupted.current_step == 6
+
+    # 3. Interrupted Run Phase 1: 3 steps, then save checkpoint
+    m_interrupted1 = GroundUpGPT(model_cfg)
+    m_interrupted1.load_state_dict(copy.deepcopy(initial_weights))
+    cfg_phase1 = TrainingConfig(
+        max_steps=3,
+        batch_size=2,
+        block_size=8,
+        learning_rate=1e-3,
+        min_lr=1e-4,
+        warmup_steps=2,
+        device="cpu",
+        seed=42,
+    )
+    t_interrupted1 = Trainer(m_interrupted1, pipeline, cfg_phase1)
+    for _ in range(3):
+        t_interrupted1.train_step()
+
+    ckpt_file = tmp_path / "resume_test.pt"
+    t_interrupted1.save_checkpoint(ckpt_file)
+    assert t_interrupted1.current_step == 3
+
+    # 4. Interrupted Run Phase 2: Resume from step 3 and train 3 more steps (total 6 steps)
+    m_resumed = GroundUpGPT(model_cfg)
+    m_resumed.load_state_dict(copy.deepcopy(initial_weights))
+    cfg_phase2 = TrainingConfig(
+        max_steps=6,
+        batch_size=2,
+        block_size=8,
+        learning_rate=1e-3,
+        min_lr=1e-4,
+        warmup_steps=2,
+        device="cpu",
+        seed=42,
+    )
+    t_resumed = Trainer(m_resumed, pipeline, cfg_phase2)
+    restored_step = t_resumed.load_checkpoint(ckpt_file)
+    assert restored_step == 3
+    assert t_resumed.current_step == 3
+
+    for _ in range(3):
+        t_resumed.train_step()
+
+    assert t_resumed.current_step == 6
+
+    # 5. Assert identical model weights between uninterrupted and resumed models
+    for key, val_unint in m_uninterrupted.state_dict().items():
+        val_resumed = m_resumed.state_dict()[key]
+        assert torch.allclose(val_unint, val_resumed, atol=1e-6), (
+            f"Weight mismatch for parameter '{key}' between uninterrupted and resumed runs."
+        )
+
+
+def test_checkpoint_tokenizer_fingerprint_rejection(tmp_path: Path) -> None:
+    """Verify that checkpoint loading rejects tokenizers with altered vocabularies or mappings."""
+    from src.tokenizer import CharTokenizer
+
+    tok1 = CharTokenizer().fit("abcdefg ")
+    p1 = TextDataPipeline(text="abcdefg " * 20, tokenizer=tok1)
+    m1 = GroundUpGPT(GPTConfig(vocab_size=tok1.vocab_size, block_size=4, embed_dim=8, num_heads=2, num_layers=1))
+
+    ckpt = tmp_path / "fp_test.pt"
+    t1 = Trainer(m1, p1, TrainingConfig(device="cpu", checkpoint_dir=str(tmp_path)))
+    t1.save_checkpoint(ckpt)
+
+    # Different character set with the same vocab length
+    tok2 = CharTokenizer().fit("tuvwxyz ")
+    assert tok2.vocab_size == tok1.vocab_size
+    assert tok2.get_fingerprint() != tok1.get_fingerprint()
+
+    p2 = TextDataPipeline(text="tuvwxyz " * 20, tokenizer=tok2)
+    m2 = GroundUpGPT(GPTConfig(vocab_size=tok2.vocab_size, block_size=4, embed_dim=8, num_heads=2, num_layers=1))
+    t2 = Trainer(m2, p2, TrainingConfig(device="cpu", checkpoint_dir=str(tmp_path)))
+
+    with pytest.raises(ValueError, match="Tokenizer identity mismatch"):
+        t2.load_checkpoint(ckpt)
+
+
+def test_checkpoint_rejection_on_architectural_flags(tmp_path: Path, sample_fixture_path: Path) -> None:
+    """Verify checkpoint loading rejects mismatched architectural flags like bias and weight_tying."""
+    pipeline = TextDataPipeline.from_file(sample_fixture_path, train_ratio=0.9)
+    cfg1 = GPTConfig(vocab_size=pipeline.vocab_size, block_size=8, embed_dim=16, num_heads=2, num_layers=1, bias=False, weight_tying=True)
+    m1 = GroundUpGPT(cfg1)
+
+    ckpt = tmp_path / "arch_flags.pt"
+    t1 = Trainer(m1, pipeline, TrainingConfig(device="cpu", checkpoint_dir=str(tmp_path)))
+    t1.save_checkpoint(ckpt)
+
+    # 1. Mismatched bias flag
+    cfg_diff_bias = GPTConfig(vocab_size=pipeline.vocab_size, block_size=8, embed_dim=16, num_heads=2, num_layers=1, bias=True, weight_tying=True)
+    m_diff_bias = GroundUpGPT(cfg_diff_bias)
+    t_diff_bias = Trainer(m_diff_bias, pipeline, TrainingConfig(device="cpu", checkpoint_dir=str(tmp_path)))
+    with pytest.raises(ValueError, match="Model architecture mismatch for 'bias'"):
+        t_diff_bias.load_checkpoint(ckpt)
+
+    # 2. Mismatched weight_tying flag
+    cfg_diff_tying = GPTConfig(vocab_size=pipeline.vocab_size, block_size=8, embed_dim=16, num_heads=2, num_layers=1, bias=False, weight_tying=False)
+    m_diff_tying = GroundUpGPT(cfg_diff_tying)
+    t_diff_tying = Trainer(m_diff_tying, pipeline, TrainingConfig(device="cpu", checkpoint_dir=str(tmp_path)))
+    with pytest.raises(ValueError, match="Model architecture mismatch for 'weight_tying'"):
+        t_diff_tying.load_checkpoint(ckpt)
+

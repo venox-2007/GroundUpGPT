@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-CUDA%20Accelerated-EE4C2C.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Step 10 Training Ready](https://img.shields.io/badge/Status-Step%2010%20Training%20Ready-brightgreen.svg)]()
+[![Status: Step 11 Generation Ready](https://img.shields.io/badge/Status-Step%2011%20Generation%20Ready-brightgreen.svg)]()
 
 GroundUpGPT is an educational and engineering project dedicated to designing, implementing, training, evaluating, and deploying a small autoregressive, decoder-only Transformer language model completely from scratch using Python and PyTorch.
 
@@ -34,6 +34,7 @@ GroundUpGPT is an educational and engineering project dedicated to designing, im
 - [Multi-Head Attention & Transformer Block](#multi-head-attention--transformer-block)
 - [Complete GroundUpGPT Model Architecture](#complete-groundupgpt-model-architecture)
 - [GPU Training Infrastructure & Optimizer](#gpu-training-infrastructure--optimizer)
+- [Autoregressive Text Generation & Streaming Engine](#autoregressive-text-generation--streaming-engine)
 - [Current Implementation Status](#current-implementation-status)
 
 ---
@@ -181,8 +182,14 @@ The project follows a phased, test-driven development plan:
   - Gradient accumulation with scaled loss calculation and gradient norm clipping.
   - Resilient checkpoint save/resume with strict validation of architecture, tokenizer type, vocabulary size, and context length.
   - Interactive training demo script (`scripts/train_gpt.py`) and test suite (`tests/test_trainer.py`).
-- [ ] **Step 11: Autoregressive Inference & Sampling Engine**
-  - Text generation pipeline with temperature, top-$k$, and top-$p$ sampling.
+- [x] **Step 11: Autoregressive Text Generation & Inference Engine**
+  - Implement reusable `TextGenerator` and `GenerationConfig` (`src/generation.py`) under `torch.inference_mode()`.
+  - Deterministic greedy decoding (`temperature=0.0`), temperature scaling, top-$k$ filtering, and nucleus top-$p$ sampling.
+  - Sliding context window cropping (`idx[:, -block_size:]`) preventing positional overflow.
+  - Token-level streaming iterator (`generate_stream`) and comprehensive execution metrics (tokens/sec, context usage ratio).
+  - Resilient byte-level BPE boundary decoding preventing crashes on incomplete multi-byte Unicode.
+  - Checkpoint hardening: RNG state preservation, deterministic tokenizer fingerprinting, and complete architectural validation.
+  - Interactive generation demo script (`scripts/generate_demo.py`) and test suite (`tests/test_generation.py`).
 - [ ] **Step 12: Full-Stack Application (FastAPI, SQLite, Next.js UI)**
   - REST/SSE streaming backend and responsive ChatGPT-inspired interface.
   - Final documentation, benchmark summaries, and sample generation logs.
@@ -419,6 +426,30 @@ python scripts/train_gpt.py
 
 ---
 
+## Autoregressive Text Generation & Streaming Engine
+
+Step 11 introduces a high-performance, reusable autoregressive inference engine (`src/generation.py`) for generating text token by token from conditioned prompts:
+- **`TextGenerator` & `GenerationConfig`**: Encapsulates model inference under `torch.inference_mode()` with `model.eval()`. Accepts `max_new_tokens`, `temperature`, `top_k`, `top_p`, and `seed`.
+- **Sampling Mechanics**:
+  - **Greedy Argmax Decoding (`temperature = 0.0`)**: Selects the highest-probability token deterministically via `argmax(logits)`.
+  - **Temperature Scaling (`temperature > 0.0`)**: Controls probability entropy by scaling logits by `1.0 / temperature`.
+  - **Top-$k$ Truncation**: Restricts candidate tokens to the $k$ highest logit values, setting remaining positions to $-\infty$.
+  - **Nucleus Top-$p$ Filtering**: Computes cumulative softmax probability mass and dynamically clips the candidate tail once cumulative density exceeds threshold $p$, ensuring at least the top-1 candidate is always preserved.
+  - **Sliding Context Window Cropping**: Crops sequences to `idx[:, -block_size:]` prior to model forward passes, preventing out-of-bounds context window exceptions.
+- **Incremental Streaming Iterator (`generate_stream`)**: Yields `StreamChunk` objects in real-time as individual tokens are predicted. Employs Python incremental UTF-8 decoders to smoothly buffer multi-byte byte fragments (such as emojis or non-ASCII characters) across token boundaries without crashing or weakening `BPETokenizer`'s strict decoding invariants.
+- **Telemetry & Throughput Tracking**: Returns structured `GenerationResult` metadata with prompt token counts, generated token counts, total duration, tokens-per-second throughput, and context window utilization ratio.
+- **Hardened Checkpoint Verification**: Checkpoints explicitly save and restore dedicated RNG generator states, require matching SHA-256 tokenizer identity fingerprints, and validate complete architectural consistency (`bias`, `weight_tying`, dimensions).
+- **Generation Quality Disclaimer**:
+  > [!NOTE]
+  > The demonstration script trains a tiny 2-layer experimental model for 15 steps on an offline fixture to prove mechanical sampling and streaming validity. Generating coherent, grammatically fluid English requires substantial pretraining on large corpora, which is planned for upcoming dataset scaling phases.
+
+### Running the Generation Demo
+```powershell
+python scripts/generate_demo.py
+```
+
+---
+
 ## Current Implementation Status
 
 - **Completed Steps**:
@@ -432,5 +463,6 @@ python scripts/train_gpt.py
   - **Step 8 — Multi-Head Attention & Transformer Block**: `MultiHeadCausalSelfAttention` in `src/attention.py`, `FeedForward` in `src/feedforward.py`, Pre-LayerNorm `TransformerBlock` in `src/transformer_block.py`, demo in `scripts/transformer_block_demo.py`, and unit test suite in `tests/test_transformer_block.py`.
   - **Step 9 — Complete GroundUpGPT Model Assembly**: Validated `GPTConfig` dataclass and full `GroundUpGPT` architecture in `src/model.py`, weight tying, Gaussian initialization, verified 5.05M parameter baseline, demo in `scripts/gpt_model_demo.py`, and unit test suite in `tests/test_model.py`.
   - **Step 10 — GPU Training Infrastructure**: `Trainer` and `TrainingConfig` in `src/trainer.py`, AdamW optimizer with selective weight decay, cosine decay LR schedule with linear warmup, AMP float16 support, gradient accumulation, gradient norm clipping, architecture-checked checkpointing, smoke demo in `scripts/train_gpt.py`, and test suite in `tests/test_trainer.py`.
+  - **Step 11 — Autoregressive Text Generation**: `TextGenerator` and `GenerationConfig` in `src/generation.py`, greedy decoding, temperature scaling, top-$k$, nucleus top-$p$, streaming iterator, resilient byte-level boundary decoding, checkpoint RNG/fingerprint hardening, demo in `scripts/generate_demo.py`, and test suite in `tests/test_generation.py`.
 - **Pending Implementation**:
-  - *Autoregressive generation engine (Step 11), evaluation and loss benchmarks, full dataset pretraining run, FastAPI backend, SQLite persistence, and Next.js frontend are pending implementation.* Development will proceed to Step 11 upon instruction.
+  - *Full-stack application (Step 12): FastAPI backend with Server-Sent Events (SSE) streaming, SQLite thread persistence, and Next.js / Tailwind interactive chat frontend.* Development will proceed to Step 12 upon instruction.

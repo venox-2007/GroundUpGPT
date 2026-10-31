@@ -64,8 +64,8 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
 | Full Transformer Blocks & Residuals | AI Engine | **Implemented** | Modular Pre-LN block with dual residual streams (Step 8) |
 | Complete GroundUpGPT Model Class | AI Engine | **Implemented** | Stacked Pre-LN blocks, final LayerNorm, LM head, weight tying (Step 9) |
 | Training Loop & LR Scheduler | AI Engine | **Implemented** | AdamW, warmup, cosine decay, AMP fp16, gradient accumulation, checkpointing (Step 10) |
-| Evaluation & Perplexity Benchmarks | AI Engine | *Planned* | Validation loss tracking |
-| Autoregressive Generation Engine | AI Engine | *Planned* | Temperature, top-$k$, top-$p$ |
+| Autoregressive Generation Engine | AI Engine | **Implemented** | Greedy decoding, temperature, top-$k$, top-$p$, streaming iterator (Step 11) |
+| Evaluation & Perplexity Benchmarks | AI Engine | *Planned* | Validation loss tracking & perplexity curves |
 | FastAPI Serving & SSE Streaming | Backend | *Planned* | Non-blocking token generator |
 | SQLite Conversation Storage | Backend | *Planned* | Thread management & settings persistence |
 | Next.js / Tailwind Chat Frontend | Frontend | *Planned* | Interactive ChatGPT-style UI |
@@ -88,8 +88,8 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
    - Step 9: Full `GroundUpGPT` model class, exact 5,051,904 parameter calibration, weight initialization. *(Implemented)*
 3. **Phase 3: Optimization, Training & Evaluation** *(In Progress)*
    - Step 10: Training pipeline with AdamW, mixed precision (`amp`), gradient accumulation, and checkpoint management. *(Implemented)*
-   - Step 11: Validation benchmarking, cross-entropy loss tracking, and perplexity curves.
-   - Step 12: Generation sampler with temperature, top-$k$, and top-$p$.
+   - Step 11: Autoregressive text generation, greedy decoding, temperature sampling, top-$k$, top-$p$, streaming iterator, and hardened checkpoints. *(Implemented)*
+   - Step 12: Local FastAPI serving, SSE streaming endpoints, and state persistence.
 4. **Phase 4: Full-Stack Application & Deployment** *(Planned)*
    - Step 13: FastAPI backend with Server-Sent Events (SSE) streaming.
    - Step 14: SQLite schema and persistence for chats and runtime settings.

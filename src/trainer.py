@@ -8,6 +8,8 @@ gradient norm clipping, and stateful checkpoint save/resumption with compatibili
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
+import hashlib
+import json
 import math
 from pathlib import Path
 import time
@@ -17,6 +19,33 @@ from torch.amp import GradScaler, autocast
 
 from src.model import GroundUpGPT, GPTConfig
 from src.data import TextDataPipeline
+
+
+def get_tokenizer_fingerprint(tokenizer: Any) -> str:
+    """Compute a deterministic SHA-256 fingerprint of tokenizer identity and rules.
+
+    Ensures that checkpoints cannot be restored with incompatible tokenizers even if
+    their class name or total vocabulary size happens to match.
+    """
+    if hasattr(tokenizer, "get_fingerprint") and callable(getattr(tokenizer, "get_fingerprint")):
+        return str(tokenizer.get_fingerprint())
+
+    tok_type = type(tokenizer).__name__
+    hasher = hashlib.sha256()
+    hasher.update(tok_type.encode("utf-8"))
+    hasher.update(b":")
+
+    if hasattr(tokenizer, "stoi"):
+        items = sorted(tokenizer.stoi.items(), key=lambda x: x[1])
+        hasher.update(json.dumps(items, ensure_ascii=False).encode("utf-8"))
+    elif hasattr(tokenizer, "merges"):
+        items = sorted([(p[0], p[1], idx) for p, idx in tokenizer.merges.items()], key=lambda x: x[2])
+        hasher.update(json.dumps(items).encode("utf-8"))
+    else:
+        v_size = getattr(tokenizer, "vocab_size", 0)
+        hasher.update(f"unknown:{v_size}".encode("utf-8"))
+
+    return hasher.hexdigest()
 
 
 @dataclass
@@ -136,12 +165,15 @@ class Trainer:
             betas=(config.beta1, config.beta2),
         )
 
-        # 4. State Tracking
+        # 4. State Tracking & Reproducible Generators
         self.current_step: int = 0
         self.checkpoint_dir: Path = Path(config.checkpoint_dir)
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-        # Generator for deterministic data sampling
+        # Synchronize global seeds and dedicated data pipeline generator
+        torch.manual_seed(config.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(config.seed)
         self.rng_generator: torch.Generator = torch.Generator().manual_seed(config.seed)
 
     def get_lr_for_step(self, step: int) -> float:
@@ -230,9 +262,11 @@ class Trainer:
             "training_config": asdict(self.config),
             "tokenizer_type": tokenizer_cls_name,
             "tokenizer_vocab_size": self.pipeline.vocab_size,
+            "tokenizer_fingerprint": get_tokenizer_fingerprint(self.pipeline.tokenizer),
             "val_loss": val_loss,
             "rng_state": torch.get_rng_state(),
             "cuda_rng_state": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+            "pipeline_rng_state": self.rng_generator.get_state(),
         }
         torch.save(checkpoint, path)
 
@@ -257,12 +291,20 @@ class Trainer:
 
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
 
-        # 1. Validate Architecture Compatibility
+        # 1. Validate Complete Architecture Compatibility
         saved_m_cfg = checkpoint.get("model_config", {})
         curr_m_cfg = asdict(self.model.config)
-        critical_keys = ("vocab_size", "block_size", "embed_dim", "num_heads", "num_layers")
+        critical_keys = (
+            "vocab_size",
+            "block_size",
+            "embed_dim",
+            "num_heads",
+            "num_layers",
+            "bias",
+            "weight_tying",
+        )
         for key in critical_keys:
-            if saved_m_cfg.get(key) != curr_m_cfg.get(key):
+            if key in saved_m_cfg and saved_m_cfg.get(key) != curr_m_cfg.get(key):
                 raise ValueError(
                     f"Model architecture mismatch for '{key}': checkpoint has {saved_m_cfg.get(key)}, "
                     f"current model has {curr_m_cfg.get(key)}."
@@ -285,16 +327,28 @@ class Trainer:
                 f"pipeline has {curr_v_size}."
             )
 
-        # 3. Restore States
+        saved_fingerprint = checkpoint.get("tokenizer_fingerprint")
+        if saved_fingerprint is not None:
+            curr_fingerprint = get_tokenizer_fingerprint(self.pipeline.tokenizer)
+            if saved_fingerprint != curr_fingerprint:
+                raise ValueError(
+                    f"Tokenizer identity mismatch: checkpoint requires fingerprint {saved_fingerprint[:16]}..., "
+                    f"current pipeline tokenizer has fingerprint {curr_fingerprint[:16]}..."
+                )
+
+        # 3. Restore Model, Optimizer, and Scaler States
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         if self.use_amp and checkpoint.get("scaler_state_dict") is not None:
             self.scaler.load_state_dict(checkpoint["scaler_state_dict"])
 
+        # 4. Restore Global and Pipeline RNG States
         if "rng_state" in checkpoint:
             torch.set_rng_state(checkpoint["rng_state"].cpu())
         if self.device.startswith("cuda") and checkpoint.get("cuda_rng_state") is not None:
             torch.cuda.set_rng_state_all([s.cpu() for s in checkpoint["cuda_rng_state"]])
+        if "pipeline_rng_state" in checkpoint:
+            self.rng_generator.set_state(checkpoint["pipeline_rng_state"].cpu())
 
         self.current_step = int(checkpoint["step"])
         return self.current_step

@@ -32,6 +32,13 @@ class BPETokenizer:
         """Return the current vocabulary size."""
         return len(self.vocab)
 
+    def get_fingerprint(self) -> str:
+        """Compute a deterministic SHA-256 fingerprint for base vocabulary and learned merges."""
+        import hashlib
+        items = sorted([(p[0], p[1], idx) for p, idx in self.merges.items()], key=lambda x: x[2])
+        payload = f"BPETokenizer:{self.vocab_size}:{json.dumps(items)}"
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
     @staticmethod
     def _get_stats(ids: list[int]) -> dict[tuple[int, int], int]:
         """Compute frequency counts for all adjacent token pairs."""

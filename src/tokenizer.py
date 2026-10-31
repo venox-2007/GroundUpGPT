@@ -29,6 +29,16 @@ class CharTokenizer:
             raise ValueError("Tokenizer has not been fitted yet. Call fit() first.")
         return len(self.stoi)
 
+    def get_fingerprint(self) -> str:
+        """Compute a deterministic SHA-256 fingerprint for vocabulary and mapping."""
+        if not self._is_fitted:
+            raise ValueError("Tokenizer has not been fitted yet. Call fit() first.")
+        import hashlib
+        import json
+        items = sorted(self.stoi.items(), key=lambda x: x[1])
+        payload = f"CharTokenizer:{json.dumps(items, ensure_ascii=False)}"
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
     def fit(self, text: str) -> CharTokenizer:
         """Build deterministic vocabulary from unique characters in sorted order.
 
