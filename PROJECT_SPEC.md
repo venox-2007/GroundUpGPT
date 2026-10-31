@@ -63,7 +63,7 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
 | Multi-Head Self-Attention & MLP | AI Engine | **Implemented** | Parallel heads, linear projection, and GELU FFN (Step 8) |
 | Full Transformer Blocks & Residuals | AI Engine | **Implemented** | Modular Pre-LN block with dual residual streams (Step 8) |
 | Complete GroundUpGPT Model Class | AI Engine | **Implemented** | Stacked Pre-LN blocks, final LayerNorm, LM head, weight tying (Step 9) |
-| Training Loop & LR Scheduler | AI Engine | *Planned* | AdamW, warmup, cosine decay |
+| Training Loop & LR Scheduler | AI Engine | **Implemented** | AdamW, warmup, cosine decay, AMP fp16, gradient accumulation, checkpointing (Step 10) |
 | Evaluation & Perplexity Benchmarks | AI Engine | *Planned* | Validation loss tracking |
 | Autoregressive Generation Engine | AI Engine | *Planned* | Temperature, top-$k$, top-$p$ |
 | FastAPI Serving & SSE Streaming | Backend | *Planned* | Non-blocking token generator |
@@ -86,8 +86,8 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
    - Step 7: Positional & token embeddings, single-head causal self-attention module. *(Implemented)*
    - Step 8: Multi-head attention, MLP layers, Pre-LayerNorm, and residual Transformer block. *(Implemented)*
    - Step 9: Full `GroundUpGPT` model class, exact 5,051,904 parameter calibration, weight initialization. *(Implemented)*
-3. **Phase 3: Optimization, Training & Evaluation** *(Planned)*
-   - Step 10: Training pipeline with AdamW, mixed precision (`amp`), and checkpoint management.
+3. **Phase 3: Optimization, Training & Evaluation** *(In Progress)*
+   - Step 10: Training pipeline with AdamW, mixed precision (`amp`), gradient accumulation, and checkpoint management. *(Implemented)*
    - Step 11: Validation benchmarking, cross-entropy loss tracking, and perplexity curves.
    - Step 12: Generation sampler with temperature, top-$k$, and top-$p$.
 4. **Phase 4: Full-Stack Application & Deployment** *(Planned)*

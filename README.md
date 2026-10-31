@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-CUDA%20Accelerated-EE4C2C.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Step 9 Model Assembled](https://img.shields.io/badge/Status-Step%209%20Model%20Assembled-brightgreen.svg)]()
+[![Status: Step 10 Training Ready](https://img.shields.io/badge/Status-Step%2010%20Training%20Ready-brightgreen.svg)]()
 
 GroundUpGPT is an educational and engineering project dedicated to designing, implementing, training, evaluating, and deploying a small autoregressive, decoder-only Transformer language model completely from scratch using Python and PyTorch.
 
@@ -33,6 +33,7 @@ GroundUpGPT is an educational and engineering project dedicated to designing, im
 - [Token Embeddings & Causal Self-Attention](#token-embeddings--causal-self-attention)
 - [Multi-Head Attention & Transformer Block](#multi-head-attention--transformer-block)
 - [Complete GroundUpGPT Model Architecture](#complete-groundupgpt-model-architecture)
+- [GPU Training Infrastructure & Optimizer](#gpu-training-infrastructure--optimizer)
 - [Current Implementation Status](#current-implementation-status)
 
 ---
@@ -173,8 +174,13 @@ The project follows a phased, test-driven development plan:
   - Gaussian weight initialization (`std=0.02`), bias zeroing, and parameter counting utilities.
   - Verified exact baseline parameter count of **5,051,904** parameters (~5.05M) tailored for RTX 3050 VRAM budgets.
   - Interactive demo (`scripts/gpt_model_demo.py`) and unit test suite (`tests/test_model.py`) verifying forward shapes, loss computation, weight tying, and optimizer steps.
-- [ ] **Step 10: Training Pipeline, Optimization & Loss Benchmarks**
-  - AdamW optimizer, warmup, cosine decay schedule, mixed-precision (`torch.amp`), and checkpointing.
+- [x] **Step 10: GPU Training Infrastructure**
+  - Implement reusable `Trainer` and `TrainingConfig` (`src/trainer.py`) supporting PyTorch AMP fp16 on CUDA.
+  - AdamW optimizer with decoupled weight decay (applied to 2D matrix weights, skipped for biases/LayerNorms).
+  - Learning rate scheduler featuring linear warmup followed by cosine decay down to `min_lr`.
+  - Gradient accumulation with scaled loss calculation and gradient norm clipping.
+  - Resilient checkpoint save/resume with strict validation of architecture, tokenizer type, vocabulary size, and context length.
+  - Interactive training demo script (`scripts/train_gpt.py`) and test suite (`tests/test_trainer.py`).
 - [ ] **Step 11: Autoregressive Inference & Sampling Engine**
   - Text generation pipeline with temperature, top-$k$, and top-$p$ sampling.
 - [ ] **Step 12: Full-Stack Application (FastAPI, SQLite, Next.js UI)**
@@ -395,6 +401,24 @@ python scripts/gpt_model_demo.py
 
 ---
 
+## GPU Training Infrastructure & Optimizer
+
+Step 10 implements a complete, hardware-calibrated training engine (`src/trainer.py`) engineered specifically for local execution on the NVIDIA GeForce RTX 3050 Laptop GPU (6GB VRAM) and CPU environments:
+- **`TrainingConfig` Dataclass**: Strict configuration container encapsulating batch size, context length, gradient accumulation steps, optimizer settings (`learning_rate`, `min_learning_rate`, `weight_decay`, `betas`, `eps`), cosine decay scheduler (`warmup_steps`, `max_steps`), gradient clipping (`max_grad_norm`), checkpoint management, mixed-precision flags, and device selection.
+- **AdamW Optimization with Weight Decay Decoupling**: Parameters are split into two groups: 2D weight matrices (linear projections, embeddings) receive decoupled weight decay, while 1D vectors (biases, LayerNorm scale and shifts) are explicitly exempted.
+- **Warmup + Cosine Decay Learning Rate Scheduler**: Linearly scales learning rate from 0 up to `learning_rate` during `warmup_steps`, followed by cosine decay down to `min_learning_rate` at `max_steps`.
+- **Automatic Mixed Precision (AMP)**: Leverages `torch.amp.autocast('cuda')` and `torch.amp.GradScaler('cuda')` for float16 mixed-precision acceleration, halving memory bandwidth demands and maximizing Tensor Core utilization on Ampere GPUs.
+- **Gradient Accumulation & Norm Clipping**: Enables effective batch sizes larger than physical VRAM by scaling loss by `1 / grad_accum_steps`, with `clip_grad_norm_` applied before optimizer updates.
+- **Safe & Validated Checkpointing**: Checkpoint files store full training state (`step`, `model_state_dict`, `optimizer_state_dict`, `scaler_state_dict`, `train_losses`, `val_losses`, `best_val_loss`, and embedded `GPTConfig` & tokenizer metadata). Strict compatibility validation prevents resuming training into a model with mismatched architecture, vocabulary size, or context window.
+- **Training Status**: *The training infrastructure, optimizer, scheduler, and checkpoint save/resume cycles have been thoroughly verified with targeted unit tests and an offline smoke run. Full model pretraining on large-scale corpora is planned for subsequent steps.*
+
+### Running the Training Demo
+```powershell
+python scripts/train_gpt.py
+```
+
+---
+
 ## Current Implementation Status
 
 - **Completed Steps**:
@@ -407,5 +431,6 @@ python scripts/gpt_model_demo.py
   - **Step 7 — Token Embeddings & Causal Self-Attention**: `TokenPositionEmbedding` in `src/embeddings.py`, single-head `CausalSelfAttentionHead` in `src/attention.py`, interactive demo in `scripts/attention_demo.py`, and unit test suite in `tests/test_attention.py`.
   - **Step 8 — Multi-Head Attention & Transformer Block**: `MultiHeadCausalSelfAttention` in `src/attention.py`, `FeedForward` in `src/feedforward.py`, Pre-LayerNorm `TransformerBlock` in `src/transformer_block.py`, demo in `scripts/transformer_block_demo.py`, and unit test suite in `tests/test_transformer_block.py`.
   - **Step 9 — Complete GroundUpGPT Model Assembly**: Validated `GPTConfig` dataclass and full `GroundUpGPT` architecture in `src/model.py`, weight tying, Gaussian initialization, verified 5.05M parameter baseline, demo in `scripts/gpt_model_demo.py`, and unit test suite in `tests/test_model.py`.
+  - **Step 10 — GPU Training Infrastructure**: `Trainer` and `TrainingConfig` in `src/trainer.py`, AdamW optimizer with selective weight decay, cosine decay LR schedule with linear warmup, AMP float16 support, gradient accumulation, gradient norm clipping, architecture-checked checkpointing, smoke demo in `scripts/train_gpt.py`, and test suite in `tests/test_trainer.py`.
 - **Pending Implementation**:
-  - *Full GPU training pipeline (Step 10), evaluation benchmarks, generation sampling engine, FastAPI backend, SQLite persistence, and Next.js frontend are pending implementation.* Development will proceed to Step 10 upon instruction.
+  - *Autoregressive generation engine (Step 11), evaluation and loss benchmarks, full dataset pretraining run, FastAPI backend, SQLite persistence, and Next.js frontend are pending implementation.* Development will proceed to Step 11 upon instruction.
