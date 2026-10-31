@@ -44,6 +44,7 @@ async def lifespan(app: FastAPI):
                 tokenizer_path=settings.tokenizer_path,
                 device_name=settings.device,
                 model_name=settings.model_name,
+                active_profile_key=settings.model_profile,
             )
         except FileNotFoundError as err:
             logger.warning(
@@ -102,22 +103,22 @@ async def get_model_info() -> ModelInfoResponse:
 
 @app.get("/api/model/profiles", tags=["System"])
 async def get_model_profiles() -> dict:
-    """Return available model profiles and which one is active."""
-    from pathlib import Path
-    available = {}
-    for k, v in MODEL_PROFILES.items():
-        if k == "5m":
-            continue
-        available[k] = {
+    """Return available model profiles and which one is active. Only returns profiles whose files exist."""
+    from backend.config import get_available_profiles
+    available_map = get_available_profiles()
+    profiles_dict = {}
+    for k, v in available_map.items():
+        profiles_dict[k] = {
             "name": v["model_name"],
             "checkpoint_path": v["checkpoint_path"],
             "tokenizer_path": v["tokenizer_path"],
-            "checkpoint_exists": Path(v["checkpoint_path"]).is_file(),
-            "tokenizer_exists": Path(v["tokenizer_path"]).is_file(),
+            "checkpoint_exists": True,
+            "tokenizer_exists": True,
         }
     return {
-        "active_model": model_manager.model_info.model_name if model_manager.model_info else None,
-        "profiles": available,
+        "active_model": model_manager.model_info.profile_name if (model_manager.model_info and model_manager.model_info.profile_name) else (model_manager.model_info.model_name if model_manager.model_info else None),
+        "active_profile": model_manager.active_profile_key,
+        "profiles": profiles_dict,
     }
 
 
@@ -142,6 +143,7 @@ async def load_model_endpoint(req: LoadModelRequest) -> ModelInfoResponse:
                 tokenizer_path=prof["tokenizer_path"],
                 device_name=settings.device,
                 model_name=prof["model_name"],
+                active_profile_key=req.profile,
             )
         except FileNotFoundError as err:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err))

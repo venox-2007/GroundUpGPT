@@ -67,6 +67,7 @@ class ModelInfoResponse(BaseModel):
 
     model_name: str
     profile_name: Optional[str] = None
+    active_profile: Optional[str] = None
     vocab_size: int
     block_size: int
     embed_dim: int
@@ -98,7 +99,7 @@ class LoadModelRequest(BaseModel):
         ...,
         min_length=1,
         max_length=64,
-        description="Target trusted model profile key ('demo', '5m', or '5m_initial').",
+        description="Target trusted model profile key ('5m_best', '5m_latest', '5m_step200', 'demo', etc.).",
     )
 
     model_config = {

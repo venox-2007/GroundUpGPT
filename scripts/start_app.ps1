@@ -81,15 +81,21 @@ if (-not $npmPath) {
 # Do not automatically retrain.
 $ckptPath = Join-Path $root 'checkpoints\demo_checkpoint.pt'
 $tokPath = Join-Path $root 'checkpoints\demo_tokenizer.json'
-$ckpt5mPath = Join-Path $root 'checkpoints\5m_initial\model_5m_step200.pt'
+$ckpt5mBest = Join-Path $root 'checkpoints\5m_continued\model_5m_best.pt'
+$ckpt5mLatest = Join-Path $root 'checkpoints\5m_continued\model_5m_latest.pt'
+$ckpt5mStep200 = Join-Path $root 'checkpoints\5m_initial\model_5m_step200.pt'
 $tok5mPath = Join-Path $root 'checkpoints\bpe_vocab4096.json'
 
 $hasCkpt = Test-Path $ckptPath
 $hasTok = Test-Path $tokPath
-$has5m = (Test-Path $ckpt5mPath) -and (Test-Path $tok5mPath)
+$hasTok5m = Test-Path $tok5mPath
+$has5mBest = (Test-Path $ckpt5mBest) -and $hasTok5m
+$has5mStep200 = (Test-Path $ckpt5mStep200) -and $hasTok5m
 
-if ($has5m) {
-    Write-Host '[*] Verified trained 5.05M model checkpoint and tokenizer artifacts.' -ForegroundColor Green
+if ($has5mBest) {
+    Write-Host '[*] Verified Best trained 5.05M model checkpoint (Step 1000) and tokenizer.' -ForegroundColor Green
+} elseif ($has5mStep200) {
+    Write-Host '[*] Verified Step 200 trained 5.05M model checkpoint and tokenizer.' -ForegroundColor Green
 }
 
 if (-not ($hasCkpt -and $hasTok)) {

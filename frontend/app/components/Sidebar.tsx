@@ -1,11 +1,13 @@
 "use client";
 
 import React, { useState } from "react";
-import { HealthStatus, ModelInfo, GenerationSettings } from "../types";
+import { HealthStatus, ModelInfo, GenerationSettings, ModelProfileEntry } from "../types";
 
 interface SidebarProps {
   health: HealthStatus | null;
   modelInfo: ModelInfo | null;
+  profiles?: Record<string, ModelProfileEntry> | null;
+  activeProfileKey?: string | null;
   settings: GenerationSettings;
   onUpdateSettings: (newSettings: GenerationSettings) => void;
   onClearChat: () => void;
@@ -18,6 +20,8 @@ interface SidebarProps {
 export function Sidebar({
   health,
   modelInfo,
+  profiles,
+  activeProfileKey,
   settings,
   onUpdateSettings,
   onClearChat,
@@ -30,6 +34,33 @@ export function Sidebar({
 
   const isConnected = health?.status === "ok";
   const isLoaded = health?.model_loaded === true;
+
+  const isProfileActive = (key: string): boolean => {
+    if (!modelInfo) return false;
+    if (activeProfileKey && activeProfileKey === key) return true;
+    if (modelInfo.active_profile && modelInfo.active_profile === key) return true;
+    if (key === "5m_best") {
+      return modelInfo.checkpoint_step === 1000 && (!modelInfo.profile_name || modelInfo.profile_name.toLowerCase().includes("best"));
+    }
+    if (key === "5m_latest") {
+      return modelInfo.checkpoint_step === 1000 && !!modelInfo.profile_name && modelInfo.profile_name.toLowerCase().includes("latest");
+    }
+    if (key === "5m_step200" || key === "5m_initial" || key === "5m") {
+      return modelInfo.checkpoint_step === 200 || (modelInfo.vocab_size === 4096 && modelInfo.checkpoint_step !== 1000);
+    }
+    if (key === "demo") {
+      return modelInfo.vocab_size < 4096;
+    }
+    return false;
+  };
+
+  const getProfileButtonLabel = (key: string, name: string): string => {
+    if (key === "5m_best") return "Best (5M)";
+    if (key === "5m_latest") return "Latest (5M)";
+    if (key === "5m_step200" || key === "5m_initial") return "Step 200 (5M)";
+    if (key === "demo") return "Demo (35K)";
+    return name;
+  };
 
   return (
     <>
@@ -101,30 +132,53 @@ export function Sidebar({
                 Model Profile
               </div>
               <div className="grid grid-cols-2 gap-1.5 font-mono text-[11px]">
-                <button
-                  type="button"
-                  disabled={isGenerating || modelInfo.vocab_size === 4096}
-                  onClick={() => onSwitchProfile("5m")}
-                  className={`rounded px-2 py-1.5 text-center font-medium transition-colors ${
-                    modelInfo.vocab_size === 4096
-                      ? "bg-teal-600 text-white font-semibold shadow-sm cursor-default"
-                      : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-                  }`}
-                >
-                  5.05M Model
-                </button>
-                <button
-                  type="button"
-                  disabled={isGenerating || modelInfo.vocab_size < 4096}
-                  onClick={() => onSwitchProfile("demo")}
-                  className={`rounded px-2 py-1.5 text-center font-medium transition-colors ${
-                    modelInfo.vocab_size < 4096
-                      ? "bg-teal-600 text-white font-semibold shadow-sm cursor-default"
-                      : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-                  }`}
-                >
-                  Demo Model
-                </button>
+                {profiles && Object.keys(profiles).length > 0 ? (
+                  Object.entries(profiles).map(([key, prof]) => {
+                    const active = isProfileActive(key);
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        disabled={isGenerating || active}
+                        onClick={() => onSwitchProfile(key)}
+                        className={`rounded px-2 py-1.5 text-center font-medium transition-colors ${
+                          active
+                            ? "bg-teal-600 text-white font-semibold shadow-sm cursor-default"
+                            : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                        }`}
+                      >
+                        {getProfileButtonLabel(key, prof.name)}
+                      </button>
+                    );
+                  })
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      disabled={isGenerating || isProfileActive("5m_best")}
+                      onClick={() => onSwitchProfile("5m_best")}
+                      className={`rounded px-2 py-1.5 text-center font-medium transition-colors ${
+                        isProfileActive("5m_best")
+                          ? "bg-teal-600 text-white font-semibold shadow-sm cursor-default"
+                          : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                      }`}
+                    >
+                      Best (5M)
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isGenerating || isProfileActive("demo")}
+                      onClick={() => onSwitchProfile("demo")}
+                      className={`rounded px-2 py-1.5 text-center font-medium transition-colors ${
+                        isProfileActive("demo")
+                          ? "bg-teal-600 text-white font-semibold shadow-sm cursor-default"
+                          : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                      }`}
+                    >
+                      Demo Model
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -163,11 +217,19 @@ export function Sidebar({
                     {modelInfo.tokenizer_type} ({modelInfo.tokenizer_vocab_size})
                   </span>
                 </div>
-                {modelInfo.checkpoint_step !== undefined && (
+                {modelInfo.checkpoint_step !== undefined && modelInfo.checkpoint_step !== null && (
                   <div className="flex justify-between">
                     <span className="text-slate-500">Step:</span>
                     <span className="text-slate-200">
                       #{modelInfo.checkpoint_step}
+                    </span>
+                  </div>
+                )}
+                {modelInfo.checkpoint_val_loss !== undefined && modelInfo.checkpoint_val_loss !== null && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Val Loss:</span>
+                    <span className="text-teal-400">
+                      {modelInfo.checkpoint_val_loss.toFixed(4)}
                     </span>
                   </div>
                 )}

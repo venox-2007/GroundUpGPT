@@ -23,6 +23,7 @@ export interface ChatMessage {
 export interface ModelInfo {
   model_name: string;
   profile_name?: string | null;
+  active_profile?: string | null;
   vocab_size: number;
   block_size: number;
   embed_dim: number;
@@ -36,6 +37,20 @@ export interface ModelInfo {
   device: string;
   checkpoint_step?: number | null;
   checkpoint_val_loss?: number | null;
+}
+
+export interface ModelProfileEntry {
+  name: string;
+  checkpoint_path: string;
+  tokenizer_path: string;
+  checkpoint_exists: boolean;
+  tokenizer_exists: boolean;
+}
+
+export interface ModelProfilesResponse {
+  active_model: string | null;
+  active_profile?: string | null;
+  profiles: Record<string, ModelProfileEntry>;
 }
 
 export interface HealthStatus {

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { ChatMessage, HealthStatus, ModelInfo, GenerationSettings } from "./types";
+import { ChatMessage, HealthStatus, ModelInfo, GenerationSettings, ModelProfileEntry } from "./types";
 import { Sidebar } from "./components/Sidebar";
 import { ChatMessageItem } from "./components/ChatMessageItem";
 import { ChatInput } from "./components/ChatInput";
@@ -24,6 +24,8 @@ export default function ChatPage() {
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
+  const [profiles, setProfiles] = useState<Record<string, ModelProfileEntry> | null>(null);
+  const [activeProfile, setActiveProfile] = useState<string | null>(null);
   const [settings, setSettings] = useState<GenerationSettings>(DEFAULT_SETTINGS);
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
 
@@ -40,10 +42,20 @@ export default function ChatPage() {
           setHealth(healthData);
 
           if (healthData.model_loaded) {
-            const infoRes = await fetch(`${API_BASE_URL}/api/model/info`);
+            const [infoRes, profRes] = await Promise.all([
+              fetch(`${API_BASE_URL}/api/model/info`),
+              fetch(`${API_BASE_URL}/api/model/profiles`),
+            ]);
             if (infoRes.ok) {
               const infoData = await infoRes.json();
               setModelInfo(infoData);
+            }
+            if (profRes.ok) {
+              const profData = await profRes.json();
+              setProfiles(profData.profiles || null);
+              if (profData.active_profile) {
+                setActiveProfile(profData.active_profile);
+              }
             }
           }
         } else {
@@ -219,6 +231,7 @@ export default function ChatPage() {
       if (res.ok) {
         const info = await res.json();
         setModelInfo(info);
+        setActiveProfile(profile);
       }
     } catch (err) {
       console.error("Failed to switch model profile:", err);
@@ -231,6 +244,8 @@ export default function ChatPage() {
       <Sidebar
         health={health}
         modelInfo={modelInfo}
+        profiles={profiles}
+        activeProfileKey={activeProfile}
         settings={settings}
         onUpdateSettings={setSettings}
         onClearChat={handleClearChat}
@@ -257,7 +272,9 @@ export default function ChatPage() {
                 GroundUpGPT
               </span>
               <span className="rounded bg-teal-950 px-2 py-0.5 text-[10px] font-mono font-medium text-teal-400 border border-teal-800">
-                Step 17 • Active
+                {modelInfo?.checkpoint_step !== undefined && modelInfo.checkpoint_step !== null
+                  ? `Step ${modelInfo.checkpoint_step} • Active`
+                  : "Active"}
               </span>
             </div>
           </div>

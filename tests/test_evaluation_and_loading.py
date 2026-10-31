@@ -83,7 +83,7 @@ def test_backend_profile_configuration_resolution(monkeypatch) -> None:
     """Verify profile resolution respects environment variables and default discovery."""
     monkeypatch.delenv("GROUNDUPGPT_MODEL_PROFILE", raising=False)
     default_prof = resolve_default_profile()
-    assert default_prof in ("5m_initial", "demo")
+    assert default_prof in ("5m_best", "5m_latest", "5m_initial", "5m_step200", "demo")
 
     monkeypatch.setenv("GROUNDUPGPT_MODEL_PROFILE", "demo")
     assert resolve_default_profile() == "demo"

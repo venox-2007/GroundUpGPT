@@ -157,7 +157,7 @@ def test_immediate_new_request_after_cancellation() -> None:
     assert not model_manager.lock.locked()
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_concurrent_generation_and_model_switching() -> None:
     """Verify model switching serializes safely and cannot overlap active inference."""
     import httpx

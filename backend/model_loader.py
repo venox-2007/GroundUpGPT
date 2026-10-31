@@ -34,6 +34,7 @@ class ModelManager:
         self.tokenizer: Optional[Union[BPETokenizer, CharTokenizer]] = None
         self.generator: Optional[TextGenerator] = None
         self.model_info: Optional[ModelInfoResponse] = None
+        self.active_profile_key: Optional[str] = None
         self.device_name: str = "cpu"
         self.lock: asyncio.Lock = asyncio.Lock()
         self._is_loaded: bool = False
@@ -49,6 +50,7 @@ class ModelManager:
         tokenizer_path: Union[str, Path],
         device_name: str = "auto",
         model_name: Optional[str] = None,
+        active_profile_key: Optional[str] = None,
     ) -> None:
         """Load trained model and matching tokenizer strictly from local trusted artifact paths.
 
@@ -154,6 +156,7 @@ class ModelManager:
         model_info = ModelInfoResponse(
             model_name="GroundUpGPT",
             profile_name=display_profile,
+            active_profile=active_profile_key,
             vocab_size=gpt_config.vocab_size,
             block_size=gpt_config.block_size,
             embed_dim=gpt_config.embed_dim,
@@ -174,6 +177,7 @@ class ModelManager:
         self.tokenizer = tokenizer
         self.generator = generator
         self.model_info = model_info
+        self.active_profile_key = active_profile_key
         self.device_name = target_device
         self._is_loaded = True
         logger.info(

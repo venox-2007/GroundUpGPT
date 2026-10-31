@@ -9,6 +9,21 @@ from typing import Any, Dict, List, Optional
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 MODEL_PROFILES: Dict[str, Dict[str, Any]] = {
+    "5m_best": {
+        "model_name": "GroundUpGPT-5M Best",
+        "checkpoint_path": str(REPO_ROOT / "checkpoints" / "5m_continued" / "model_5m_best.pt"),
+        "tokenizer_path": str(REPO_ROOT / "checkpoints" / "bpe_vocab4096.json"),
+    },
+    "5m_latest": {
+        "model_name": "GroundUpGPT-5M Latest",
+        "checkpoint_path": str(REPO_ROOT / "checkpoints" / "5m_continued" / "model_5m_latest.pt"),
+        "tokenizer_path": str(REPO_ROOT / "checkpoints" / "bpe_vocab4096.json"),
+    },
+    "5m_step200": {
+        "model_name": "GroundUpGPT-5M Step 200",
+        "checkpoint_path": str(REPO_ROOT / "checkpoints" / "5m_initial" / "model_5m_step200.pt"),
+        "tokenizer_path": str(REPO_ROOT / "checkpoints" / "bpe_vocab4096.json"),
+    },
     "5m_initial": {
         "model_name": "GroundUpGPT-5M (5.05M)",
         "checkpoint_path": str(REPO_ROOT / "checkpoints" / "5m_initial" / "model_5m_step200.pt"),
@@ -33,11 +48,55 @@ def resolve_default_profile() -> str:
     if env_profile:
         return env_profile.lower().strip()
 
-    # If 5M trained checkpoint exists, prefer it
-    p5m = REPO_ROOT / "checkpoints" / "5m_initial" / "model_5m_step200.pt"
-    if p5m.is_file():
-        return "5m_initial"
+    # 1. Prefer Best continued 5M checkpoint if available
+    p5m_best = REPO_ROOT / "checkpoints" / "5m_continued" / "model_5m_best.pt"
+    p_bpe = REPO_ROOT / "checkpoints" / "bpe_vocab4096.json"
+    if p5m_best.is_file() and p_bpe.is_file():
+        return "5m_best"
+
+    # 2. Prefer Latest continued 5M checkpoint if available
+    p5m_latest = REPO_ROOT / "checkpoints" / "5m_continued" / "model_5m_latest.pt"
+    if p5m_latest.is_file() and p_bpe.is_file():
+        return "5m_latest"
+
+    # 3. Prefer Initial Step 200 checkpoint if available
+    p5m_step200 = REPO_ROOT / "checkpoints" / "5m_initial" / "model_5m_step200.pt"
+    if p5m_step200.is_file() and p_bpe.is_file():
+        return "5m_step200"
+
+    # 4. Fall back to demo checkpoint
     return "demo"
+
+
+def get_available_profiles() -> Dict[str, Dict[str, Any]]:
+    """Return only profiles whose checkpoint and tokenizer files actually exist on disk."""
+    available = {}
+    display_order = ["5m_best", "5m_latest", "5m_step200", "5m_initial", "demo"]
+    for key in display_order:
+        if key not in MODEL_PROFILES:
+            continue
+        prof = MODEL_PROFILES[key]
+        ckpt_p = Path(prof["checkpoint_path"])
+        tok_p = Path(prof["tokenizer_path"])
+        if ckpt_p.is_file() and tok_p.is_file():
+            available[key] = prof
+
+    # Check for legacy aliases if 5m_step200 is not present
+    if "5m_step200" not in available and "5m_best" not in available and "5m_latest" not in available:
+        v_init = MODEL_PROFILES.get("5m_initial")
+        if v_init and Path(v_init["checkpoint_path"]).is_file() and Path(v_init["tokenizer_path"]).is_file():
+            available["5m_initial"] = v_init
+
+    # Include any custom registered profiles (excluding redundant aliases)
+    for k, v in MODEL_PROFILES.items():
+        if k in available or k in ("5m", "5m_initial", "5m_step200", "5m_best", "5m_latest", "demo"):
+            continue
+        ckpt_p = Path(v["checkpoint_path"])
+        tok_p = Path(v["tokenizer_path"])
+        if ckpt_p.is_file() and tok_p.is_file():
+            available[k] = v
+
+    return available
 
 
 def get_trusted_profile(profile_name: str) -> Optional[Dict[str, Any]]:
