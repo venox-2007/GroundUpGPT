@@ -72,25 +72,26 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
 
 ## 5. Phased Implementation Roadmap
 
-1. **Phase 1: Foundations & Tokenization** *(Steps 1–5)*
+1. **Phase 1: Foundations & Tokenization** *(Steps 1–6)*
    - Step 1: Project initialization, environment setup, CUDA verification.
    - Step 2: Educational character-level tokenizer and unit tests.
    - Step 3: Trainable Bigram language model baseline and project blueprint.
    - Step 4: Text dataset ingestion, sequential splitting, and batching pipeline.
    - Step 5: Byte-level Byte Pair Encoding (BPE) tokenizer and serialization.
+   - Step 6: BPE robustness (strict UTF-8, hardened load validation) & configurable data pipeline.
 2. **Phase 2: Core Transformer Architecture** *(Planned)*
-   - Step 6: Positional & token embeddings, causal self-attention modules.
-   - Step 7: MLP layers, LayerNorm/RMSNorm, and residual assembly into Transformer blocks.
-   - Step 8: Full `GroundUpGPT` model class, parameter count verification (~5M), weight initialization.
+   - Step 7: Positional & token embeddings, causal self-attention modules.
+   - Step 8: MLP layers, LayerNorm/RMSNorm, and residual assembly into Transformer blocks.
+   - Step 9: Full `GroundUpGPT` model class, parameter count verification (~5M), weight initialization.
 3. **Phase 3: Optimization, Training & Evaluation** *(Planned)*
-   - Step 9: Training pipeline with AdamW, mixed precision (`amp`), and checkpoint management.
-   - Step 10: Validation benchmarking, cross-entropy loss tracking, and perplexity curves.
-   - Step 11: Generation sampler with temperature, top-$k$, and top-$p$.
+   - Step 10: Training pipeline with AdamW, mixed precision (`amp`), and checkpoint management.
+   - Step 11: Validation benchmarking, cross-entropy loss tracking, and perplexity curves.
+   - Step 12: Generation sampler with temperature, top-$k$, and top-$p$.
 4. **Phase 4: Full-Stack Application & Deployment** *(Planned)*
-   - Step 12: FastAPI backend with Server-Sent Events (SSE) streaming.
-   - Step 13: SQLite schema and persistence for chats and runtime settings.
-   - Step 14: Next.js/React frontend with streaming UI, metrics dashboard, and parameter controls.
-   - Step 15: Final portfolio packaging, comprehensive benchmarks, and deployment guide.
+   - Step 13: FastAPI backend with Server-Sent Events (SSE) streaming.
+   - Step 14: SQLite schema and persistence for chats and runtime settings.
+   - Step 15: Next.js/React frontend with streaming UI, metrics dashboard, and parameter controls.
+   - Step 16: Final portfolio packaging, comprehensive benchmarks, and deployment guide.
 
 ---
 

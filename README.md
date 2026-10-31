@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-CUDA%20Accelerated-EE4C2C.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Step 5 BPE Ready](https://img.shields.io/badge/Status-Step%205%20BPE%20Ready-brightgreen.svg)]()
+[![Status: Step 6 Hardened](https://img.shields.io/badge/Status-Step%206%20Hardened-brightgreen.svg)]()
 
 GroundUpGPT is an educational and engineering project dedicated to designing, implementing, training, evaluating, and deploying a small autoregressive, decoder-only Transformer language model completely from scratch using Python and PyTorch.
 
@@ -147,17 +147,22 @@ The project follows a phased, test-driven development plan:
   - Deterministic tie-breaking, priority-based encoding, and lossless Unicode/emoji round-trip reconstruction.
   - Portable JSON serialization (`save` / `load`) and seamless `TextDataPipeline` compatibility.
   - Interactive demonstration script (`scripts/bpe_demo.py`) and test suite (`tests/test_bpe_tokenizer.py`).
-- [ ] **Step 6: Core Transformer Architectural Blocks**
+- [x] **Step 6: BPE Robustness & Data Pipeline Configuration**
+  - Strict UTF-8 decoding with error detection on malformed or truncated byte sequences.
+  - Hardened serialization validation (duplicate merges, non-contiguous ranks, future token ID references, base token protection).
+  - Removal of arbitrary training early-stops to allow full convergence.
+  - Configurable BPE vocabulary size parameter (`bpe_vocab_size`) in `TextDataPipeline`.
+- [ ] **Step 7: Core Transformer Architectural Blocks**
   - Positional embeddings and token embeddings.
   - Causal multi-head self-attention module with triangular masking.
   - Position-wise feed-forward network (FFN) and residual normalization blocks.
-- [ ] **Step 7: Full Model Assembly & Weight Initialization**
+- [ ] **Step 8: Full Model Assembly & Weight Initialization**
   - Complete `GroundUpGPT` model class (~5M target parameters).
-- [ ] **Step 8: Training Pipeline & Optimization**
+- [ ] **Step 9: Training Pipeline & Optimization**
   - AdamW optimizer, warmup, cosine decay schedule, mixed-precision (`torch.amp`), and checkpointing.
-- [ ] **Step 9: Evaluation & Autoregressive Inference Engine**
+- [ ] **Step 10: Evaluation & Autoregressive Inference Engine**
   - Text generation pipeline with temperature, top-$k$, and top-$p$ sampling.
-- [ ] **Step 10: Full-Stack Application (FastAPI, SQLite, Next.js UI)**
+- [ ] **Step 11: Full-Stack Application (FastAPI, SQLite, Next.js UI)**
   - REST/SSE streaming backend and responsive ChatGPT-inspired interface.
   - Final documentation, benchmark summaries, and sample generation logs.
 
@@ -328,5 +333,6 @@ python scripts/bpe_demo.py
   - **Step 3 — Bigram Model & Project Blueprint**: Project blueprint (`PROJECT_SPEC.md`), trainable `BigramLanguageModel` in `src/bigram.py`, training demo in `scripts/train_bigram_demo.py`, and unit test suite in `tests/test_bigram.py`.
   - **Step 4 — Dataset Ingestion & Batching**: Reusable `TextDataPipeline` in `src/data.py`, offline text fixture in `tests/fixtures/sample_text.txt`, batching demo in `scripts/data_pipeline_demo.py`, and unit test suite in `tests/test_data.py`.
   - **Step 5 — Byte-Level BPE Tokenizer**: Custom `BPETokenizer` in `src/bpe_tokenizer.py`, demo in `scripts/bpe_demo.py`, unit test suite in `tests/test_bpe_tokenizer.py`, and `TextDataPipeline` compatibility.
+  - **Step 6 — BPE Robustness & Data Pipeline Configuration**: Strict UTF-8 decoding, hardened JSON schema validation, removal of early-stop limits, and explicit `bpe_vocab_size` configuration in `src/data.py`.
 - **Pending Implementation**:
-  - *Transformer attention layers, multi-head mechanisms, full GPT model class, and web chat application layers have not yet been implemented.* Development will proceed to Step 6 upon instruction.
+  - *Transformer attention layers, multi-head mechanisms, full GPT model class, and web chat application layers have not yet been implemented.* Development will proceed to Step 7 upon instruction.

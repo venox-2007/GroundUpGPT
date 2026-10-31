@@ -37,9 +37,13 @@ class TextDataPipeline:
         file_path: Optional[Union[str, Path]] = None,
         train_ratio: float = 0.9,
         tokenizer: Optional[TokenizerType] = None,
+        bpe_vocab_size: Optional[int] = None,
     ) -> None:
         if text is None and file_path is None:
             raise ValueError("Must provide either 'text' or 'file_path'.")
+
+        if bpe_vocab_size is not None and bpe_vocab_size < 256:
+            raise ValueError(f"bpe_vocab_size must be at least 256, got {bpe_vocab_size}")
 
         if file_path is not None:
             path = Path(file_path)
@@ -58,6 +62,7 @@ class TextDataPipeline:
 
         self.raw_text: str = text
         self.train_ratio: float = train_ratio
+        self.bpe_vocab_size: Optional[int] = bpe_vocab_size
 
         # 1. Sequential Splitting
         total_len = len(text)
@@ -79,9 +84,9 @@ class TextDataPipeline:
             # If an unfitted tokenizer instance was supplied, fit it strictly on training text
             if not getattr(self.tokenizer, "_is_fitted", False):
                 if isinstance(self.tokenizer, BPETokenizer):
-                    # For small corpus, scale merges defensively to prevent excessive token collapse
-                    max_merges = max(2, min(32, len(self.train_text) // 10))
-                    self.tokenizer.fit(self.train_text, target_vocab_size=256 + max_merges)
+                    # Use explicitly configured BPE vocabulary size, or educational default (300)
+                    target_vocab = bpe_vocab_size if bpe_vocab_size is not None else 300
+                    self.tokenizer.fit(self.train_text, target_vocab_size=target_vocab)
                 else:
                     self.tokenizer.fit(self.train_text)
 
@@ -105,9 +110,15 @@ class TextDataPipeline:
         file_path: Union[str, Path],
         train_ratio: float = 0.9,
         tokenizer: Optional[TokenizerType] = None,
+        bpe_vocab_size: Optional[int] = None,
     ) -> TextDataPipeline:
         """Convenience constructor to initialize pipeline directly from a file."""
-        return cls(file_path=file_path, train_ratio=train_ratio, tokenizer=tokenizer)
+        return cls(
+            file_path=file_path,
+            train_ratio=train_ratio,
+            tokenizer=tokenizer,
+            bpe_vocab_size=bpe_vocab_size,
+        )
 
     @property
     def vocab_size(self) -> int:

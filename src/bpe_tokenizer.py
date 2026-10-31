@@ -83,9 +83,6 @@ class BPETokenizer:
         self.ranks = {}
 
         for rank in range(num_merges):
-            if len(ids) <= 4:
-                break
-
             stats = self._get_stats(ids)
             if not stats:
                 break
@@ -165,7 +162,12 @@ class BPETokenizer:
             byte_parts.append(self.vocab[token_id])
 
         raw_bytes = b"".join(byte_parts)
-        return raw_bytes.decode("utf-8", errors="replace")
+        try:
+            return raw_bytes.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as err:
+            raise ValueError(
+                f"Failed to decode byte sequence into valid UTF-8 string: {err}"
+            ) from err
 
     def save(self, file_path: Union[str, Path]) -> None:
         """Save learned BPE merge rules and metadata to a portable JSON file.
@@ -191,7 +193,7 @@ class BPETokenizer:
 
     @classmethod
     def load(cls, file_path: Union[str, Path]) -> BPETokenizer:
-        """Load a saved BPETokenizer from a JSON file.
+        """Load a saved BPETokenizer from a JSON file with rigorous validation.
 
         Args:
             file_path: Path to the JSON file.
@@ -201,7 +203,7 @@ class BPETokenizer:
 
         Raises:
             FileNotFoundError: If the file does not exist.
-            ValueError: If the file is malformed or corrupted.
+            ValueError: If metadata, ranks, IDs, merges, or vocab sizes are corrupted.
         """
         path = Path(file_path)
         if not path.is_file():
@@ -213,26 +215,102 @@ class BPETokenizer:
         except Exception as err:
             raise ValueError(f"Failed to parse tokenizer JSON file: {err}") from err
 
-        if not isinstance(data, dict) or data.get("type") != "byte_bpe" or "merges" not in data:
-            raise ValueError("Malformed tokenizer JSON: missing required 'byte_bpe' structure.")
+        # 1. Structural and metadata validation
+        if not isinstance(data, dict):
+            raise ValueError("Malformed tokenizer JSON: root must be an object.")
+        if data.get("type") != "byte_bpe":
+            raise ValueError(f"Unsupported tokenizer type: {data.get('type')!r}, expected 'byte_bpe'.")
+        if not isinstance(data.get("version"), str):
+            raise ValueError("Malformed tokenizer JSON: missing or invalid 'version' field.")
+
+        declared_vocab_size = data.get("vocab_size")
+        if not isinstance(declared_vocab_size, int) or declared_vocab_size < 256:
+            raise ValueError(
+                f"Malformed tokenizer JSON: invalid vocab_size {declared_vocab_size!r}."
+            )
+
+        merges_data = data.get("merges")
+        if not isinstance(merges_data, list):
+            raise ValueError("Malformed tokenizer JSON: 'merges' must be a list.")
+
+        expected_vocab_size = 256 + len(merges_data)
+        if declared_vocab_size != expected_vocab_size:
+            raise ValueError(
+                f"Inconsistent declared vocab_size {declared_vocab_size} does not match "
+                f"base 256 bytes + {len(merges_data)} merges ({expected_vocab_size})."
+            )
 
         tokenizer = cls()
         tokenizer.vocab = {i: bytes([i]) for i in range(256)}
         tokenizer.merges = {}
         tokenizer.ranks = {}
 
-        # Sort merges by rank to reconstruct vocabulary deterministically
+        seen_pairs: set[tuple[int, int]] = set()
+        seen_new_ids: set[int] = set()
+        seen_ranks: set[int] = set()
+
+        # 2. Sort by rank to reconstruct deterministically
         try:
-            sorted_merges = sorted(data["merges"], key=lambda m: m[3])
-            for p0, p1, new_id, rank in sorted_merges:
-                pair = (int(p0), int(p1))
-                new_id = int(new_id)
-                rank = int(rank)
-                tokenizer.merges[pair] = new_id
-                tokenizer.ranks[pair] = rank
-                tokenizer.vocab[new_id] = tokenizer.vocab[pair[0]] + tokenizer.vocab[pair[1]]
+            sorted_merges = sorted(merges_data, key=lambda m: m[3])
         except Exception as err:
-            raise ValueError(f"Corrupted merge entries in tokenizer file: {err}") from err
+            raise ValueError(f"Malformed merge entries in tokenizer file: {err}") from err
+
+        # 3. Step-by-step merge validation and vocabulary reconstruction
+        for expected_rank, entry in enumerate(sorted_merges):
+            if not isinstance(entry, (list, tuple)) or len(entry) != 4:
+                raise ValueError(
+                    f"Invalid merge entry format at rank {expected_rank}: {entry!r}. "
+                    "Expected [p0, p1, new_id, rank]."
+                )
+
+            p0, p1, new_id, rank = entry
+            if not all(isinstance(v, int) for v in (p0, p1, new_id, rank)):
+                raise ValueError(f"All merge elements must be integers, got {entry!r}.")
+
+            # Rank contiguity and duplicate check
+            if rank in seen_ranks:
+                raise ValueError(f"Duplicate merge rank detected: {rank}.")
+            if rank != expected_rank:
+                raise ValueError(
+                    f"Non-contiguous merge rank: expected {expected_rank}, got {rank}."
+                )
+            seen_ranks.add(rank)
+
+            # Generated token ID validation
+            expected_new_id = 256 + rank
+            if new_id < 256:
+                raise ValueError(
+                    f"Cannot overwrite base byte token ID {new_id}. "
+                    "Learned token IDs must be >= 256."
+                )
+            if new_id in seen_new_ids:
+                raise ValueError(f"Duplicate merged token ID detected: {new_id}.")
+            if new_id != expected_new_id:
+                raise ValueError(
+                    f"Non-contiguous token ID: expected {expected_new_id}, got {new_id}."
+                )
+            seen_new_ids.add(new_id)
+
+            # Merge pair uniqueness and dependency validation
+            pair = (p0, p1)
+            if pair in seen_pairs:
+                raise ValueError(f"Duplicate merge pair detected: {pair}.")
+            if p0 not in tokenizer.vocab or p1 not in tokenizer.vocab:
+                raise ValueError(
+                    f"Merge references unavailable or future token IDs: pair={pair}, "
+                    f"available vocabulary size={len(tokenizer.vocab)}."
+                )
+
+            seen_pairs.add(pair)
+            tokenizer.merges[pair] = new_id
+            tokenizer.ranks[pair] = rank
+            tokenizer.vocab[new_id] = tokenizer.vocab[p0] + tokenizer.vocab[p1]
+
+        if len(tokenizer.vocab) != declared_vocab_size:
+            raise ValueError(
+                f"Reconstructed vocabulary size {len(tokenizer.vocab)} does not match "
+                f"declared vocab_size {declared_vocab_size}."
+            )
 
         tokenizer._is_fitted = True
         return tokenizer
