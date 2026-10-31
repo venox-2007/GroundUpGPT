@@ -57,7 +57,7 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
 | Character-Level Tokenizer | AI Engine | **Implemented** | Pure Python `CharTokenizer` (Step 2) |
 | Bigram Language Model Baseline | AI Engine | **Implemented** | Learnable lookup table & CE loss (Step 3) |
 | Dataset Ingestion & Batching Pipeline | AI Engine | **Implemented** | Sequential splitting & mini-batch sampler (Step 4) |
-| Byte-Pair Encoding (BPE) Tokenizer | AI Engine | *Planned* | Subword vocabulary compression |
+| Byte-Pair Encoding (BPE) Tokenizer | AI Engine | **Implemented** | Byte-level subword BPE & lossless UTF-8 (Step 5) |
 | Causal Multi-Head Self-Attention | AI Engine | *Planned* | Triangular masked scaled dot-product |
 | Full Transformer Blocks & Residuals | AI Engine | *Planned* | Modular Pre-LN architecture |
 | Training Loop & LR Scheduler | AI Engine | *Planned* | AdamW, warmup, cosine decay |
@@ -72,22 +72,21 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
 
 ## 5. Phased Implementation Roadmap
 
-1. **Phase 1: Foundations & Baselines** *(Steps 1–4)*
+1. **Phase 1: Foundations & Tokenization** *(Steps 1–5)*
    - Step 1: Project initialization, environment setup, CUDA verification.
    - Step 2: Educational character-level tokenizer and unit tests.
    - Step 3: Trainable Bigram language model baseline and project blueprint.
    - Step 4: Text dataset ingestion, sequential splitting, and batching pipeline.
-2. **Phase 2: Advanced Tokenization & Data Pipelines**
-   - Step 5: Byte-Pair Encoding (BPE) subword tokenizer and large corpus tokenization.
-3. **Phase 3: Core Transformer Architecture**
+   - Step 5: Byte-level Byte Pair Encoding (BPE) tokenizer and serialization.
+2. **Phase 2: Core Transformer Architecture** *(Planned)*
    - Step 6: Positional & token embeddings, causal self-attention modules.
    - Step 7: MLP layers, LayerNorm/RMSNorm, and residual assembly into Transformer blocks.
    - Step 8: Full `GroundUpGPT` model class, parameter count verification (~5M), weight initialization.
-4. **Phase 4: Optimization, Training & Evaluation**
+3. **Phase 3: Optimization, Training & Evaluation** *(Planned)*
    - Step 9: Training pipeline with AdamW, mixed precision (`amp`), and checkpoint management.
    - Step 10: Validation benchmarking, cross-entropy loss tracking, and perplexity curves.
    - Step 11: Generation sampler with temperature, top-$k$, and top-$p$.
-5. **Phase 5: Full-Stack Application & Deployment**
+4. **Phase 4: Full-Stack Application & Deployment** *(Planned)*
    - Step 12: FastAPI backend with Server-Sent Events (SSE) streaming.
    - Step 13: SQLite schema and persistence for chats and runtime settings.
    - Step 14: Next.js/React frontend with streaming UI, metrics dashboard, and parameter controls.

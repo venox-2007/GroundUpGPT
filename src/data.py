@@ -6,6 +6,9 @@ from pathlib import Path
 from typing import Optional, Union
 import torch
 from src.tokenizer import CharTokenizer
+from src.bpe_tokenizer import BPETokenizer
+
+TokenizerType = Union[CharTokenizer, BPETokenizer]
 
 
 class TextDataPipeline:
@@ -33,7 +36,7 @@ class TextDataPipeline:
         text: Optional[str] = None,
         file_path: Optional[Union[str, Path]] = None,
         train_ratio: float = 0.9,
-        tokenizer: Optional[CharTokenizer] = None,
+        tokenizer: Optional[TokenizerType] = None,
     ) -> None:
         if text is None and file_path is None:
             raise ValueError("Must provide either 'text' or 'file_path'.")
@@ -70,9 +73,17 @@ class TextDataPipeline:
 
         # 2. Tokenizer Fitting (Train split only)
         if tokenizer is None:
-            self.tokenizer: CharTokenizer = CharTokenizer().fit(self.train_text)
+            self.tokenizer: TokenizerType = CharTokenizer().fit(self.train_text)
         else:
             self.tokenizer = tokenizer
+            # If an unfitted tokenizer instance was supplied, fit it strictly on training text
+            if not getattr(self.tokenizer, "_is_fitted", False):
+                if isinstance(self.tokenizer, BPETokenizer):
+                    # For small corpus, scale merges defensively to prevent excessive token collapse
+                    max_merges = max(2, min(32, len(self.train_text) // 10))
+                    self.tokenizer.fit(self.train_text, target_vocab_size=256 + max_merges)
+                else:
+                    self.tokenizer.fit(self.train_text)
 
         # 3. Token Encoding with strict validation
         self.train_tokens: list[int] = self.tokenizer.encode(self.train_text)
@@ -93,7 +104,7 @@ class TextDataPipeline:
         cls,
         file_path: Union[str, Path],
         train_ratio: float = 0.9,
-        tokenizer: Optional[CharTokenizer] = None,
+        tokenizer: Optional[TokenizerType] = None,
     ) -> TextDataPipeline:
         """Convenience constructor to initialize pipeline directly from a file."""
         return cls(file_path=file_path, train_ratio=train_ratio, tokenizer=tokenizer)

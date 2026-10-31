@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-CUDA%20Accelerated-EE4C2C.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Step 4 Ingested](https://img.shields.io/badge/Status-Step%204%20Ingested-brightgreen.svg)]()
+[![Status: Step 5 BPE Ready](https://img.shields.io/badge/Status-Step%205%20BPE%20Ready-brightgreen.svg)]()
 
 GroundUpGPT is an educational and engineering project dedicated to designing, implementing, training, evaluating, and deploying a small autoregressive, decoder-only Transformer language model completely from scratch using Python and PyTorch.
 
@@ -29,6 +29,7 @@ GroundUpGPT is an educational and engineering project dedicated to designing, im
 - [Character-Level Tokenizer](#character-level-tokenizer)
 - [Bigram Language Model Baseline](#bigram-language-model-baseline)
 - [Dataset Ingestion & Batching Pipeline](#dataset-ingestion--batching-pipeline)
+- [Byte-Level BPE Tokenizer](#byte-level-bpe-tokenizer)
 - [Current Implementation Status](#current-implementation-status)
 
 ---
@@ -141,17 +142,22 @@ The project follows a phased, test-driven development plan:
   - Character encoding with strict validation of unseen characters in validation splits.
   - Random mini-batch sampling producing causal input/target pairs shifted by 1 token.
   - Offline text fixture (`tests/fixtures/sample_text.txt`) and pipeline demo (`scripts/data_pipeline_demo.py`).
-- [ ] **Step 5: Core Transformer Architectural Blocks**
+- [x] **Step 5: Byte-Level BPE Tokenizer**
+  - Implement `BPETokenizer` (`src/bpe_tokenizer.py`) operating on 256 base UTF-8 bytes with iterative pair merges.
+  - Deterministic tie-breaking, priority-based encoding, and lossless Unicode/emoji round-trip reconstruction.
+  - Portable JSON serialization (`save` / `load`) and seamless `TextDataPipeline` compatibility.
+  - Interactive demonstration script (`scripts/bpe_demo.py`) and test suite (`tests/test_bpe_tokenizer.py`).
+- [ ] **Step 6: Core Transformer Architectural Blocks**
   - Positional embeddings and token embeddings.
   - Causal multi-head self-attention module with triangular masking.
   - Position-wise feed-forward network (FFN) and residual normalization blocks.
-- [ ] **Step 6: Full Model Assembly & Weight Initialization**
+- [ ] **Step 7: Full Model Assembly & Weight Initialization**
   - Complete `GroundUpGPT` model class (~5M target parameters).
-- [ ] **Step 7: Training Pipeline & Optimization**
+- [ ] **Step 8: Training Pipeline & Optimization**
   - AdamW optimizer, warmup, cosine decay schedule, mixed-precision (`torch.amp`), and checkpointing.
-- [ ] **Step 8: Evaluation & Autoregressive Inference Engine**
+- [ ] **Step 9: Evaluation & Autoregressive Inference Engine**
   - Text generation pipeline with temperature, top-$k$, and top-$p$ sampling.
-- [ ] **Step 9: Full-Stack Application (FastAPI, SQLite, Next.js UI)**
+- [ ] **Step 10: Full-Stack Application (FastAPI, SQLite, Next.js UI)**
   - REST/SSE streaming backend and responsive ChatGPT-inspired interface.
   - Final documentation, benchmark summaries, and sample generation logs.
 
@@ -298,6 +304,22 @@ python scripts/data_pipeline_demo.py
 
 ---
 
+## Byte-Level BPE Tokenizer
+
+The custom `BPETokenizer` (`src/bpe_tokenizer.py`) compresses text into subword units using byte-level Byte Pair Encoding:
+- **Base Vocabulary (0–255)**: Grounded in all 256 individual UTF-8 byte values, preventing out-of-vocabulary failures for any character, symbol, or language.
+- **Deterministic Merges**: Iteratively identifies the most frequent adjacent token pairs using strict frequency and lexicographical tie-breaking, merging them into new tokens (IDs starting at 256).
+- **Priority-Ordered Encoding**: Encodes text by applying learned merges in their original training priority order.
+- **Lossless Reconstruction**: Restores exact strings upon decoding, including multi-byte Unicode and complex emojis.
+- **Portability**: Supports saving and loading learned rules via standard JSON metadata files (`save()` / `load()`).
+
+### Running the BPE Demo
+```powershell
+python scripts/bpe_demo.py
+```
+
+---
+
 ## Current Implementation Status
 
 - **Completed Steps**:
@@ -305,5 +327,6 @@ python scripts/data_pipeline_demo.py
   - **Step 2 — Character-Level Tokenizer**: Custom `CharTokenizer` in `src/tokenizer.py`, demo in `scripts/tokenizer_demo.py`, test coverage in `tests/test_tokenizer.py`.
   - **Step 3 — Bigram Model & Project Blueprint**: Project blueprint (`PROJECT_SPEC.md`), trainable `BigramLanguageModel` in `src/bigram.py`, training demo in `scripts/train_bigram_demo.py`, and unit test suite in `tests/test_bigram.py`.
   - **Step 4 — Dataset Ingestion & Batching**: Reusable `TextDataPipeline` in `src/data.py`, offline text fixture in `tests/fixtures/sample_text.txt`, batching demo in `scripts/data_pipeline_demo.py`, and unit test suite in `tests/test_data.py`.
+  - **Step 5 — Byte-Level BPE Tokenizer**: Custom `BPETokenizer` in `src/bpe_tokenizer.py`, demo in `scripts/bpe_demo.py`, unit test suite in `tests/test_bpe_tokenizer.py`, and `TextDataPipeline` compatibility.
 - **Pending Implementation**:
-  - *Transformer attention layers, multi-head mechanisms, full GPT model class, and web chat application layers have not yet been implemented.* Development will proceed to Step 5 upon instruction.
+  - *Transformer attention layers, multi-head mechanisms, full GPT model class, and web chat application layers have not yet been implemented.* Development will proceed to Step 6 upon instruction.
