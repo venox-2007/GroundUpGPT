@@ -6,6 +6,7 @@ for any arbitrary text, including Unicode and emoji.
 
 from __future__ import annotations
 
+import heapq
 import json
 from pathlib import Path
 from typing import Sequence, Union
@@ -35,7 +36,11 @@ class BPETokenizer:
     def get_fingerprint(self) -> str:
         """Compute a deterministic SHA-256 fingerprint for base vocabulary and learned merges."""
         import hashlib
-        items = sorted([(p[0], p[1], idx) for p, idx in self.merges.items()], key=lambda x: x[2])
+
+        items = sorted(
+            [(p[0], p[1], idx) for p, idx in self.merges.items()],
+            key=lambda x: x[2],
+        )
         payload = f"BPETokenizer:{self.vocab_size}:{json.dumps(items)}"
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -62,6 +67,125 @@ class BPETokenizer:
                 i += 1
         return new_ids
 
+    def _fit_fast(self, raw_bytes: list[int], num_merges: int) -> None:
+        """Optimized first-principles BPE merge learner using linked lists and lazy priority queue."""
+        from collections import defaultdict
+
+        n = len(raw_bytes)
+        if n < 2 or num_merges <= 0:
+            return
+
+        # Doubly-linked list node pointers
+        prev_i = list(range(-1, n - 1))
+        next_i = list(range(1, n + 1))
+        next_i[-1] = -1
+        val = list(raw_bytes)
+
+        pair_counts: dict[tuple[int, int], int] = defaultdict(int)
+        pair_locs: dict[tuple[int, int], set[int]] = defaultdict(set)
+
+        for i in range(n - 1):
+            p = (val[i], val[i + 1])
+            pair_counts[p] += 1
+            pair_locs[p].add(i)
+
+        heap: list[tuple[int, int, int, tuple[int, int]]] = []
+        for p, c in pair_counts.items():
+            if c >= 2:
+                heap.append((-c, p[0], p[1], p))
+        heapq.heapify(heap)
+
+        for rank in range(num_merges):
+            best_pair = None
+            while heap:
+                neg_c, p0, p1, p = heapq.heappop(heap)
+                curr_c = pair_counts.get(p, 0)
+                if curr_c < 2:
+                    continue
+                if -neg_c == curr_c:
+                    best_pair = p
+                    break
+                else:
+                    heapq.heappush(heap, (-curr_c, p[0], p[1], p))
+
+            if best_pair is None or pair_counts.get(best_pair, 0) < 2:
+                # Stop when no pairs occur at least twice
+                break
+
+            new_id = 256 + rank
+            self.merges[best_pair] = new_id
+            self.ranks[best_pair] = rank
+            self.vocab[new_id] = (
+                self.vocab[best_pair[0]] + self.vocab[best_pair[1]]
+            )
+
+            # Process all occurrences of best_pair in left-to-right order
+            locs = sorted(pair_locs[best_pair])
+            del pair_counts[best_pair]
+            del pair_locs[best_pair]
+
+            for pos in locs:
+                j = next_i[pos]
+                if (
+                    j == -1
+                    or val[pos] != best_pair[0]
+                    or val[j] != best_pair[1]
+                ):
+                    continue
+
+                p_idx = prev_i[pos]
+                k = next_i[j]
+
+                # Remove old left pair
+                if p_idx != -1:
+                    old_left = (val[p_idx], val[pos])
+                    pair_counts[old_left] -= 1
+                    pair_locs[old_left].discard(p_idx)
+
+                # Remove old right pair
+                if k != -1:
+                    old_right = (val[j], val[k])
+                    pair_counts[old_right] -= 1
+                    pair_locs[old_right].discard(j)
+
+                # Merge nodes
+                val[pos] = new_id
+                next_i[pos] = k
+                if k != -1:
+                    prev_i[k] = pos
+
+                # Add new left pair
+                if p_idx != -1:
+                    new_left = (val[p_idx], new_id)
+                    pair_counts[new_left] += 1
+                    pair_locs[new_left].add(p_idx)
+                    if pair_counts[new_left] >= 2:
+                        heapq.heappush(
+                            heap,
+                            (
+                                -pair_counts[new_left],
+                                new_left[0],
+                                new_left[1],
+                                new_left,
+                            ),
+                        )
+
+                # Add new right pair
+                if k != -1:
+                    new_right = (new_id, val[k])
+                    pair_counts[new_right] += 1
+                    pair_locs[new_right].add(pos)
+                    if pair_counts[new_right] >= 2:
+                        heapq.heappush(
+                            heap,
+                            (
+                                -pair_counts[new_right],
+                                new_right[0],
+                                new_right[1],
+                                new_right,
+                            ),
+                        )
+
     def fit(self, text: str, target_vocab_size: int = 300) -> BPETokenizer:
         """Train BPE merge rules on the input text corpus.
 
@@ -78,38 +202,40 @@ class BPETokenizer:
         if not text:
             raise ValueError("Cannot fit BPETokenizer on empty text.")
         if target_vocab_size < 256:
-            raise ValueError(f"target_vocab_size must be at least 256, got {target_vocab_size}")
+            raise ValueError(
+                f"target_vocab_size must be at least 256, got {target_vocab_size}"
+            )
 
         num_merges = target_vocab_size - 256
-        raw_bytes = text.encode("utf-8")
-        ids = list(raw_bytes)
+        raw_bytes = list(text.encode("utf-8"))
 
         # Reset vocabulary and merges
         self.vocab = {i: bytes([i]) for i in range(256)}
         self.merges = {}
         self.ranks = {}
 
-        for rank in range(num_merges):
-            stats = self._get_stats(ids)
-            if not stats:
-                break
-
-            # Deterministic tie-breaking:
-            # Sort by frequency descending (-freq), then by lexicographical order of token ID pair (p[0], p[1])
-            best_pair = min(stats.keys(), key=lambda p: (-stats[p], p[0], p[1]))
-
-            # Stop if the most frequent pair occurs less than 2 times
-            if stats[best_pair] < 2:
-                break
-
-            new_id = 256 + rank
-            ids = self._merge(ids, best_pair, new_id)
-            self.merges[best_pair] = new_id
-            self.ranks[best_pair] = rank
-            self.vocab[new_id] = self.vocab[best_pair[0]] + self.vocab[best_pair[1]]
+        if num_merges > 0:
+            self._fit_fast(raw_bytes, num_merges)
 
         self._is_fitted = True
         return self
+
+    def _encode_chunk(self, chunk_bytes: bytes) -> list[int]:
+        """Encode a single slice/line of bytes using priority-ranked merges."""
+        ids = list(chunk_bytes)
+        if len(ids) < 2 or not self.merges:
+            return ids
+
+        while len(ids) >= 2:
+            stats = self._get_stats(ids)
+            eligible_pairs = [p for p in stats if p in self.ranks]
+            if not eligible_pairs:
+                break
+            best_pair = min(eligible_pairs, key=lambda p: self.ranks[p])
+            idx = self.merges[best_pair]
+            ids = self._merge(ids, best_pair, idx)
+
+        return ids
 
     def encode(self, text: str) -> list[int]:
         """Encode input text into a sequence of BPE token IDs.
@@ -124,25 +250,22 @@ class BPETokenizer:
         """
         if not text:
             return []
+        if not self.merges:
+            return list(text.encode("utf-8"))
 
-        # Convert text into initial byte IDs [0..255]
-        ids = list(text.encode("utf-8"))
-        if len(ids) < 2 or not self.merges:
-            return ids
+        # For multi-line text, process line-by-line with memoization cache for high throughput
+        if "\n" in text:
+            lines = text.splitlines(keepends=True)
+            cache: dict[bytes, list[int]] = {}
+            all_ids: list[int] = []
+            for line in lines:
+                raw_b = line.encode("utf-8")
+                if raw_b not in cache:
+                    cache[raw_b] = self._encode_chunk(raw_b)
+                all_ids.extend(cache[raw_b])
+            return all_ids
 
-        # Iteratively merge the highest priority pair until no mergeable pairs exist
-        while len(ids) >= 2:
-            stats = self._get_stats(ids)
-            # Find candidate pair with the lowest rank (earliest learned merge)
-            eligible_pairs = [p for p in stats if p in self.ranks]
-            if not eligible_pairs:
-                break
-
-            best_pair = min(eligible_pairs, key=lambda p: self.ranks[p])
-            idx = self.merges[best_pair]
-            ids = self._merge(ids, best_pair, idx)
-
-        return ids
+        return self._encode_chunk(text.encode("utf-8"))
 
     def decode(self, ids: Sequence[int]) -> str:
         """Decode a sequence of token IDs back into a UTF-8 text string.
@@ -180,33 +303,44 @@ class BPETokenizer:
         """Save learned BPE merge rules and metadata to a portable JSON file.
 
         Args:
-            file_path: Destination JSON file path.
+            file_path: Destination path for the saved JSON tokenizer file.
         """
-        path = Path(file_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        file_path = Path(file_path)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Serialized format: list of [tokenA, tokenB, merged_id, rank]
+        merges_serialized = [
+            [pair[0], pair[1], token_id, self.ranks[pair]]
+            for pair, token_id in sorted(self.merges.items(), key=lambda x: self.ranks[x[0]])
+        ]
 
         data = {
             "version": "1.0",
             "type": "byte_bpe",
             "vocab_size": self.vocab_size,
-            "merges": [
-                [pair[0], pair[1], new_id, self.ranks[pair]]
-                for pair, new_id in self.merges.items()
-            ],
+            "merges": merges_serialized,
         }
 
-        with open(path, "w", encoding="utf-8") as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
 
     @classmethod
     def load(cls, file_path: Union[str, Path]) -> BPETokenizer:
-        """Load a saved BPETokenizer from a JSON file with rigorous validation.
+        """Load and strictly validate a saved BPE tokenizer from JSON file.
+
+        Performs comprehensive integrity validation:
+        1. Confirms required top-level schema fields.
+        2. Rejects duplicate merge ranks, duplicate pairs, or duplicate token IDs.
+        3. Validates contiguous merge ranks starting from 0.
+        4. Validates contiguous token IDs starting from 256.
+        5. Validates dependency causality: merge pairs must reference existing IDs.
+        6. Confirms final reconstructed vocabulary size matches declared vocab_size.
 
         Args:
-            file_path: Path to the JSON file.
+            file_path: Path to the JSON tokenizer file.
 
         Returns:
-            BPETokenizer: Restored tokenizer instance.
+            BPETokenizer: Reconstructed and validated tokenizer instance.
 
         Raises:
             FileNotFoundError: If the file does not exist.
