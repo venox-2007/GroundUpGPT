@@ -58,7 +58,9 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
 | Bigram Language Model Baseline | AI Engine | **Implemented** | Learnable lookup table & CE loss (Step 3) |
 | Dataset Ingestion & Batching Pipeline | AI Engine | **Implemented** | Sequential splitting & mini-batch sampler (Step 4) |
 | Byte-Pair Encoding (BPE) Tokenizer | AI Engine | **Implemented** | Byte-level subword BPE & lossless UTF-8 (Step 5) |
-| Causal Multi-Head Self-Attention | AI Engine | *Planned* | Triangular masked scaled dot-product |
+| Token & Positional Embeddings | AI Engine | **Implemented** | Learnable token + absolute position lookup (Step 7) |
+| Single-Head Causal Self-Attention | AI Engine | **Implemented** | Explicit Q, K, V with triangular masking (Step 7) |
+| Multi-Head Self-Attention & MLP | AI Engine | *Planned* | Parallel attention heads, projections, and FFN |
 | Full Transformer Blocks & Residuals | AI Engine | *Planned* | Modular Pre-LN architecture |
 | Training Loop & LR Scheduler | AI Engine | *Planned* | AdamW, warmup, cosine decay |
 | Evaluation & Perplexity Benchmarks | AI Engine | *Planned* | Validation loss tracking |
@@ -79,10 +81,10 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
    - Step 4: Text dataset ingestion, sequential splitting, and batching pipeline.
    - Step 5: Byte-level Byte Pair Encoding (BPE) tokenizer and serialization.
    - Step 6: BPE robustness (strict UTF-8, hardened load validation) & configurable data pipeline.
-2. **Phase 2: Core Transformer Architecture** *(Planned)*
-   - Step 7: Positional & token embeddings, causal self-attention modules.
-   - Step 8: MLP layers, LayerNorm/RMSNorm, and residual assembly into Transformer blocks.
-   - Step 9: Full `GroundUpGPT` model class, parameter count verification (~5M), weight initialization.
+2. **Phase 2: Core Transformer Architecture**
+   - Step 7: Positional & token embeddings, single-head causal self-attention module. *(Implemented)*
+   - Step 8: Multi-head attention, MLP layers, LayerNorm/RMSNorm, and residual assembly into Transformer blocks. *(Planned)*
+   - Step 9: Full `GroundUpGPT` model class, parameter count verification (~5M), weight initialization. *(Planned)*
 3. **Phase 3: Optimization, Training & Evaluation** *(Planned)*
    - Step 10: Training pipeline with AdamW, mixed precision (`amp`), and checkpoint management.
    - Step 11: Validation benchmarking, cross-entropy loss tracking, and perplexity curves.

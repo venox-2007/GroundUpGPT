@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-CUDA%20Accelerated-EE4C2C.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Step 6 Hardened](https://img.shields.io/badge/Status-Step%206%20Hardened-brightgreen.svg)]()
+[![Status: Step 7 Attention](https://img.shields.io/badge/Status-Step%207%20Attention-brightgreen.svg)]()
 
 GroundUpGPT is an educational and engineering project dedicated to designing, implementing, training, evaluating, and deploying a small autoregressive, decoder-only Transformer language model completely from scratch using Python and PyTorch.
 
@@ -30,6 +30,7 @@ GroundUpGPT is an educational and engineering project dedicated to designing, im
 - [Bigram Language Model Baseline](#bigram-language-model-baseline)
 - [Dataset Ingestion & Batching Pipeline](#dataset-ingestion--batching-pipeline)
 - [Byte-Level BPE Tokenizer](#byte-level-bpe-tokenizer)
+- [Token Embeddings & Causal Self-Attention](#token-embeddings--causal-self-attention)
 - [Current Implementation Status](#current-implementation-status)
 
 ---
@@ -152,17 +153,22 @@ The project follows a phased, test-driven development plan:
   - Hardened serialization validation (duplicate merges, non-contiguous ranks, future token ID references, base token protection).
   - Removal of arbitrary training early-stops to allow full convergence.
   - Configurable BPE vocabulary size parameter (`bpe_vocab_size`) in `TextDataPipeline`.
-- [ ] **Step 7: Core Transformer Architectural Blocks**
-  - Positional embeddings and token embeddings.
-  - Causal multi-head self-attention module with triangular masking.
-  - Position-wise feed-forward network (FFN) and residual normalization blocks.
-- [ ] **Step 8: Full Model Assembly & Weight Initialization**
+- [x] **Step 7: Token Embeddings & Causal Self-Attention**
+  - Implement `TokenPositionEmbedding` (`src/embeddings.py`) with learnable token and absolute positional lookup tables.
+  - Implement single-head `CausalSelfAttentionHead` (`src/attention.py`) with explicit Q, K, V projections, scaled dot-product scores, and lower-triangular causal masking.
+  - Interactive demonstration script (`scripts/attention_demo.py`) proving probability normalization and zero information leakage from future tokens.
+  - Unit test suite (`tests/test_attention.py`) verifying tensor shapes, masking causality, context validation, and backprop gradients.
+- [ ] **Step 8: Multi-Head Attention, MLP & Transformer Blocks**
+  - Multi-head parallel attention projections and linear output projection.
+  - Position-wise feed-forward network (FFN / MLP) with GELU activation.
+  - Pre-LayerNorm / RMSNorm and residual stream additions into complete Transformer blocks.
+- [ ] **Step 9: Full Model Assembly & Weight Initialization**
   - Complete `GroundUpGPT` model class (~5M target parameters).
-- [ ] **Step 9: Training Pipeline & Optimization**
+- [ ] **Step 10: Training Pipeline & Optimization**
   - AdamW optimizer, warmup, cosine decay schedule, mixed-precision (`torch.amp`), and checkpointing.
-- [ ] **Step 10: Evaluation & Autoregressive Inference Engine**
+- [ ] **Step 11: Evaluation & Autoregressive Inference Engine**
   - Text generation pipeline with temperature, top-$k$, and top-$p$ sampling.
-- [ ] **Step 11: Full-Stack Application (FastAPI, SQLite, Next.js UI)**
+- [ ] **Step 12: Full-Stack Application (FastAPI, SQLite, Next.js UI)**
   - REST/SSE streaming backend and responsive ChatGPT-inspired interface.
   - Final documentation, benchmark summaries, and sample generation logs.
 
@@ -325,6 +331,24 @@ python scripts/bpe_demo.py
 
 ---
 
+## Token Embeddings & Causal Self-Attention
+
+Step 7 implements the mathematical core of the Transformer's representation layer:
+- **Token & Positional Embeddings (`src/embeddings.py`)**: Combines a discrete token lookup table (`nn.Embedding(vocab_size, embed_dim)`) with a learnable absolute position table (`nn.Embedding(block_size, embed_dim)`), enabling the model to retain positional ordering along the sequence dimension.
+- **Single-Head Causal Self-Attention (`src/attention.py`)**:
+  - Implements explicit Query ($Q$), Key ($K$), and Value ($V$) linear projections ($W_q, W_k, W_v$).
+  - Computes raw attention affinities: $S = \frac{Q K^T}{\sqrt{d_k}}$.
+  - Imposes strict autoregressive causality by masking the upper-triangular region ($j > i$) to $-\infty$ *before* softmax, ensuring token $i$ only attends to tokens $j \le i$.
+  - Computes normalized probability weights: $A = \text{softmax}(S, \text{dim}=-1)$.
+  - Aggregates values into contextualized representations: $O = A V$.
+
+### Running the Attention Demo
+```powershell
+python scripts/attention_demo.py
+```
+
+---
+
 ## Current Implementation Status
 
 - **Completed Steps**:
@@ -334,5 +358,6 @@ python scripts/bpe_demo.py
   - **Step 4 — Dataset Ingestion & Batching**: Reusable `TextDataPipeline` in `src/data.py`, offline text fixture in `tests/fixtures/sample_text.txt`, batching demo in `scripts/data_pipeline_demo.py`, and unit test suite in `tests/test_data.py`.
   - **Step 5 — Byte-Level BPE Tokenizer**: Custom `BPETokenizer` in `src/bpe_tokenizer.py`, demo in `scripts/bpe_demo.py`, unit test suite in `tests/test_bpe_tokenizer.py`, and `TextDataPipeline` compatibility.
   - **Step 6 — BPE Robustness & Data Pipeline Configuration**: Strict UTF-8 decoding, hardened JSON schema validation, removal of early-stop limits, and explicit `bpe_vocab_size` configuration in `src/data.py`.
+  - **Step 7 — Token Embeddings & Causal Self-Attention**: `TokenPositionEmbedding` in `src/embeddings.py`, single-head `CausalSelfAttentionHead` in `src/attention.py`, interactive demo in `scripts/attention_demo.py`, and unit test suite in `tests/test_attention.py`.
 - **Pending Implementation**:
-  - *Transformer attention layers, multi-head mechanisms, full GPT model class, and web chat application layers have not yet been implemented.* Development will proceed to Step 7 upon instruction.
+  - *Multi-head attention mechanisms, feed-forward networks (MLP), layer normalization, residual blocks, full GPT assembly, and full-stack chat layers are pending implementation.* Development will proceed to Step 8 upon instruction.
