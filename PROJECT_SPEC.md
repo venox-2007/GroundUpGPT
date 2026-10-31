@@ -40,7 +40,7 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
 - **Storage**: 512 GB SSD.
 
 ### B. Model Quality & Performance Boundaries
-- **Parameter Target**: ~5 Million parameters ($5 \times 10^6$).
+- **Parameter Target**: ~5 Million parameters ($5 \times 10^6$) *(Provisional target; subject to benchmarking and exact architectural parameter formulas)*.
 - **Context Window**: 256 to 512 tokens.
 - **Realistic Expectations**:
   - The model will effectively capture local grammatical rules, character/subword transitions, and domain-specific stylistic patterns (e.g., Shakespeare, TinyStories, or code snippets).
@@ -56,6 +56,7 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
 | CUDA Diagnostic Utility | Tooling | **Implemented** | Verified RTX 3050 6GB support |
 | Character-Level Tokenizer | AI Engine | **Implemented** | Pure Python `CharTokenizer` (Step 2) |
 | Bigram Language Model Baseline | AI Engine | **Implemented** | Learnable lookup table & CE loss (Step 3) |
+| Dataset Ingestion & Batching Pipeline | AI Engine | **Implemented** | Sequential splitting & mini-batch sampler (Step 4) |
 | Byte-Pair Encoding (BPE) Tokenizer | AI Engine | *Planned* | Subword vocabulary compression |
 | Causal Multi-Head Self-Attention | AI Engine | *Planned* | Triangular masked scaled dot-product |
 | Full Transformer Blocks & Residuals | AI Engine | *Planned* | Modular Pre-LN architecture |
@@ -71,13 +72,13 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
 
 ## 5. Phased Implementation Roadmap
 
-1. **Phase 1: Foundations & Baselines** *(Steps 1–3)*
+1. **Phase 1: Foundations & Baselines** *(Steps 1–4)*
    - Step 1: Project initialization, environment setup, CUDA verification.
    - Step 2: Educational character-level tokenizer and unit tests.
    - Step 3: Trainable Bigram language model baseline and project blueprint.
-2. **Phase 2: Tokenization & Data Ingestion**
-   - Step 4: Dataset acquisition, clean text ingestion, and chunked batching DataLoader.
-   - Step 5: Byte-Pair Encoding (BPE) subword tokenizer implementation.
+   - Step 4: Text dataset ingestion, sequential splitting, and batching pipeline.
+2. **Phase 2: Advanced Tokenization & Data Pipelines**
+   - Step 5: Byte-Pair Encoding (BPE) subword tokenizer and large corpus tokenization.
 3. **Phase 3: Core Transformer Architecture**
    - Step 6: Positional & token embeddings, causal self-attention modules.
    - Step 7: MLP layers, LayerNorm/RMSNorm, and residual assembly into Transformer blocks.

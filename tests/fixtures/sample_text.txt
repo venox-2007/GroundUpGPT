@@ -1,0 +1,11 @@
+GroundUpGPT is a decoder-only Transformer built from scratch.
+We explore tokenization, embeddings, self-attention, and training loops.
+Every component is implemented purely using PyTorch tensor operations.
+GroundUpGPT is a decoder-only Transformer built from scratch.
+We explore tokenization, embeddings, self-attention, and training loops.
+Every component is implemented purely using PyTorch tensor operations.
+GroundUpGPT is a decoder-only Transformer built from scratch.
+We explore tokenization, embeddings, self-attention, and training loops.
+Every component is implemented purely using PyTorch tensor operations.
+GroundUpGPT is a decoder-only Transformer built from scratch.
+We explore tokenization, embeddings, self-attention, and training loops.

@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-CUDA%20Accelerated-EE4C2C.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Step 1 Initialized](https://img.shields.io/badge/Status-Step%201%20Initialized-brightgreen.svg)]()
+[![Status: Step 4 Ingested](https://img.shields.io/badge/Status-Step%204%20Ingested-brightgreen.svg)]()
 
 GroundUpGPT is an educational and engineering project dedicated to designing, implementing, training, evaluating, and deploying a small autoregressive, decoder-only Transformer language model completely from scratch using Python and PyTorch.
 
@@ -28,6 +28,7 @@ GroundUpGPT is an educational and engineering project dedicated to designing, im
 - [Running Environment Verification](#running-environment-verification)
 - [Character-Level Tokenizer](#character-level-tokenizer)
 - [Bigram Language Model Baseline](#bigram-language-model-baseline)
+- [Dataset Ingestion & Batching Pipeline](#dataset-ingestion--batching-pipeline)
 - [Current Implementation Status](#current-implementation-status)
 
 ---
@@ -95,7 +96,7 @@ The planned baseline configuration is a compact, decoder-only Transformer modele
 | Architectural Hyperparameter | Target Baseline Specification |
 | :--- | :--- |
 | **Model Type** | Decoder-only Autoregressive Transformer |
-| **Target Parameters** | ~5,000,000 (5M) |
+| **Target Parameters** | ~5,000,000 (5M) *(Provisional target; will be strictly verified once architecture dimensions are selected)* |
 | **Vocabulary Size ($V$)** | ~4,096 to 8,192 tokens (custom BPE or byte-level) |
 | **Context Length ($T$)** | 256 – 512 tokens |
 | **Hidden Dimension ($d_{model}$)** | 256 – 384 |
@@ -135,8 +136,11 @@ The project follows a phased, test-driven development plan:
   - Document comprehensive long-term blueprint in `PROJECT_SPEC.md`.
   - Implement baseline `BigramLanguageModel` (`src/bigram.py`) with lookup table and cross-entropy loss.
   - Implement AdamW training loop demo (`scripts/train_bigram_demo.py`) and targeted test suite (`tests/test_bigram.py`).
-- [ ] **Step 4: Data Ingestion & Batching Pipeline**
-  - Dataset acquisition, ingestion, and chunked batch DataLoader with causal sequence shifting.
+- [x] **Step 4: Data Ingestion & Batching Pipeline**
+  - Implement reusable `TextDataPipeline` (`src/data.py`) with sequential train/val splitting.
+  - Character encoding with strict validation of unseen characters in validation splits.
+  - Random mini-batch sampling producing causal input/target pairs shifted by 1 token.
+  - Offline text fixture (`tests/fixtures/sample_text.txt`) and pipeline demo (`scripts/data_pipeline_demo.py`).
 - [ ] **Step 5: Core Transformer Architectural Blocks**
   - Positional embeddings and token embeddings.
   - Causal multi-head self-attention module with triangular masking.
@@ -279,11 +283,27 @@ python scripts/train_bigram_demo.py
 
 ---
 
+## Dataset Ingestion & Batching Pipeline
+
+The data pipeline (`src/data.py`) provides efficient, reliable sequence batching for training:
+- **Sequential Splitting**: Splits text into non-overlapping training and validation partitions (default 90/10).
+- **Strict Vocabulary Fitting**: Fits tokenizers exclusively on the training split, throwing an explicit error if the validation partition contains unseen characters.
+- **Causal Next-Token Shifting**: Samples random starting indices within partition boundaries and constructs input (`x`) and target (`y`) sequences where `y[b, t] == x[b, t+1]`.
+- **Extensible Architecture**: Decoupled from specific tokenizer implementations to support future subword tokenization (BPE) seamlessly.
+
+### Running the Data Pipeline Demo
+```powershell
+python scripts/data_pipeline_demo.py
+```
+
+---
+
 ## Current Implementation Status
 
 - **Completed Steps**:
   - **Step 1 — Project Initialization**: Repository structure, Git ignore rules, CUDA hardware verification (`scripts/check_environment.py`).
   - **Step 2 — Character-Level Tokenizer**: Custom `CharTokenizer` in `src/tokenizer.py`, demo in `scripts/tokenizer_demo.py`, test coverage in `tests/test_tokenizer.py`.
   - **Step 3 — Bigram Model & Project Blueprint**: Project blueprint (`PROJECT_SPEC.md`), trainable `BigramLanguageModel` in `src/bigram.py`, training demo in `scripts/train_bigram_demo.py`, and unit test suite in `tests/test_bigram.py`.
+  - **Step 4 — Dataset Ingestion & Batching**: Reusable `TextDataPipeline` in `src/data.py`, offline text fixture in `tests/fixtures/sample_text.txt`, batching demo in `scripts/data_pipeline_demo.py`, and unit test suite in `tests/test_data.py`.
 - **Pending Implementation**:
-  - *Data pipeline, BPE tokenizer, Transformer attention blocks, and full-stack chat layers have not yet been implemented.* Development will proceed to Step 4 upon instruction.
+  - *Transformer attention layers, multi-head mechanisms, full GPT model class, and web chat application layers have not yet been implemented.* Development will proceed to Step 5 upon instruction.
