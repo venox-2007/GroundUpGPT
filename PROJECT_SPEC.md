@@ -62,7 +62,7 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
 | Single-Head Causal Self-Attention | AI Engine | **Implemented** | Explicit Q, K, V with triangular masking (Step 7) |
 | Multi-Head Self-Attention & MLP | AI Engine | **Implemented** | Parallel heads, linear projection, and GELU FFN (Step 8) |
 | Full Transformer Blocks & Residuals | AI Engine | **Implemented** | Modular Pre-LN block with dual residual streams (Step 8) |
-| Complete GroundUpGPT Model Class | AI Engine | *Planned* | Stacked blocks, final LayerNorm, LM head, weight tying |
+| Complete GroundUpGPT Model Class | AI Engine | **Implemented** | Stacked Pre-LN blocks, final LayerNorm, LM head, weight tying (Step 9) |
 | Training Loop & LR Scheduler | AI Engine | *Planned* | AdamW, warmup, cosine decay |
 | Evaluation & Perplexity Benchmarks | AI Engine | *Planned* | Validation loss tracking |
 | Autoregressive Generation Engine | AI Engine | *Planned* | Temperature, top-$k$, top-$p$ |
@@ -82,10 +82,10 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
    - Step 4: Text dataset ingestion, sequential splitting, and batching pipeline.
    - Step 5: Byte-level Byte Pair Encoding (BPE) tokenizer and serialization.
    - Step 6: BPE robustness (strict UTF-8, hardened load validation) & configurable data pipeline.
-2. **Phase 2: Core Transformer Architecture**
+2. **Phase 2: Core Transformer Architecture** *(Completed)*
    - Step 7: Positional & token embeddings, single-head causal self-attention module. *(Implemented)*
    - Step 8: Multi-head attention, MLP layers, Pre-LayerNorm, and residual Transformer block. *(Implemented)*
-   - Step 9: Full `GroundUpGPT` model class, parameter count verification (~5M), weight initialization. *(Planned)*
+   - Step 9: Full `GroundUpGPT` model class, exact 5,051,904 parameter calibration, weight initialization. *(Implemented)*
 3. **Phase 3: Optimization, Training & Evaluation** *(Planned)*
    - Step 10: Training pipeline with AdamW, mixed precision (`amp`), and checkpoint management.
    - Step 11: Validation benchmarking, cross-entropy loss tracking, and perplexity curves.

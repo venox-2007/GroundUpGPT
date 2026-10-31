@@ -11,6 +11,7 @@ from src.embeddings import TokenPositionEmbedding
 from src.attention import CausalSelfAttentionHead, MultiHeadCausalSelfAttention
 from src.feedforward import FeedForward
 from src.transformer_block import TransformerBlock
+from src.model import GPTConfig, GroundUpGPT
 
 __version__ = "0.1.0"
 __all__ = [
@@ -23,4 +24,6 @@ __all__ = [
     "MultiHeadCausalSelfAttention",
     "FeedForward",
     "TransformerBlock",
+    "GPTConfig",
+    "GroundUpGPT",
 ]

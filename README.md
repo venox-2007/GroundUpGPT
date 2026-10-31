@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-CUDA%20Accelerated-EE4C2C.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Step 8 Block Ready](https://img.shields.io/badge/Status-Step%208%20Block%20Ready-brightgreen.svg)]()
+[![Status: Step 9 Model Assembled](https://img.shields.io/badge/Status-Step%209%20Model%20Assembled-brightgreen.svg)]()
 
 GroundUpGPT is an educational and engineering project dedicated to designing, implementing, training, evaluating, and deploying a small autoregressive, decoder-only Transformer language model completely from scratch using Python and PyTorch.
 
@@ -32,6 +32,7 @@ GroundUpGPT is an educational and engineering project dedicated to designing, im
 - [Byte-Level BPE Tokenizer](#byte-level-bpe-tokenizer)
 - [Token Embeddings & Causal Self-Attention](#token-embeddings--causal-self-attention)
 - [Multi-Head Attention & Transformer Block](#multi-head-attention--transformer-block)
+- [Complete GroundUpGPT Model Architecture](#complete-groundupgpt-model-architecture)
 - [Current Implementation Status](#current-implementation-status)
 
 ---
@@ -99,16 +100,17 @@ The planned baseline configuration is a compact, decoder-only Transformer modele
 | Architectural Hyperparameter | Target Baseline Specification |
 | :--- | :--- |
 | **Model Type** | Decoder-only Autoregressive Transformer |
-| **Target Parameters** | ~5,000,000 (5M) *(Provisional target; will be strictly verified once architecture dimensions are selected)* |
-| **Vocabulary Size ($V$)** | ~4,096 to 8,192 tokens (custom BPE or byte-level) |
-| **Context Length ($T$)** | 256 – 512 tokens |
-| **Hidden Dimension ($d_{model}$)** | 256 – 384 |
-| **Number of Layers ($N$)** | 6 – 8 Transformer blocks |
-| **Attention Heads ($H$)** | 4 – 8 (Head dimension $d_k = d_{model} / H$) |
-| **Feed-Forward Dimension ($d_{ff}$)** | $4 \times d_{model}$ (1024 – 1536) |
-| **Normalization** | Pre-Layer Normalization (Pre-LN) or RMSNorm |
+| **Target Parameters** | **5,051,904** unique parameters (~5.05M verified in Step 9) |
+| **Vocabulary Size ($V$)** | 4,096 tokens (BPE subwords) |
+| **Context Length ($T$)** | 256 tokens |
+| **Hidden Dimension ($d_{model}$)** | 256 |
+| **Number of Layers ($N$)** | 5 Transformer blocks |
+| **Attention Heads ($H$)** | 4 heads ($d_k = 64$) |
+| **Feed-Forward Dimension ($d_{ff}$)** | $4 \times d_{model} = 1024$ |
+| **Normalization** | Pre-Layer Normalization (Pre-LN) |
 | **Activation Function** | GELU (Gaussian Error Linear Unit) |
-| **Positional Encoding** | Learned absolute positional embeddings or Rotary (RoPE) |
+| **Positional Encoding** | Learnable absolute positional embeddings |
+| **Weight Tying** | Token embeddings and LM head projection tied |
 
 ---
 
@@ -165,10 +167,12 @@ The project follows a phased, test-driven development plan:
   - Implement Pre-LayerNorm `TransformerBlock` (`src/transformer_block.py`) with residual addition streams ($x + \text{Attention}(\text{LN}_1(x))$, $x + \text{FFN}(\text{LN}_2(x))$).
   - Interactive demonstration script (`scripts/transformer_block_demo.py`) verifying full-block parameter counts, shape flow, and causal leakage prevention.
   - Unit test suite (`tests/test_transformer_block.py`) covering divisibility checks, gradient propagation, and train/eval dropout behavior.
-- [ ] **Step 9: Full GPT Model Assembly & Parameter Calibration**
-  - Complete `GroundUpGPT` model class stacking Transformer blocks with final LayerNorm and LM head.
-  - Weight tying (embeddings and LM head output projection) and initialization scaling.
-  - Model parameter count calculation and alignment with the ~5M provisional target on RTX 3050 hardware.
+- [x] **Step 9: Complete GroundUpGPT Model Assembly**
+  - Implement validated `GPTConfig` dataclass and full `GroundUpGPT` model architecture (`src/model.py`).
+  - Stack configurable Transformer blocks, final `LayerNorm`, and language modeling head with optional weight tying.
+  - Gaussian weight initialization (`std=0.02`), bias zeroing, and parameter counting utilities.
+  - Verified exact baseline parameter count of **5,051,904** parameters (~5.05M) tailored for RTX 3050 VRAM budgets.
+  - Interactive demo (`scripts/gpt_model_demo.py`) and unit test suite (`tests/test_model.py`) verifying forward shapes, loss computation, weight tying, and optimizer steps.
 - [ ] **Step 10: Training Pipeline, Optimization & Loss Benchmarks**
   - AdamW optimizer, warmup, cosine decay schedule, mixed-precision (`torch.amp`), and checkpointing.
 - [ ] **Step 11: Autoregressive Inference & Sampling Engine**
@@ -368,6 +372,29 @@ python scripts/transformer_block_demo.py
 
 ---
 
+## Complete GroundUpGPT Model Architecture
+
+Step 9 integrates all preceding layers into the unified `GroundUpGPT` model (`src/model.py`) with configuration managed via `GPTConfig`:
+- **Module Hierarchy**:
+  1. `TokenPositionEmbedding`: Input token IDs $(B, T) \to$ Combined representations $(B, T, d_{model})$.
+  2. `Dropout`: Applied to input representations ($p = 0.1$).
+  3. `nn.ModuleList([TransformerBlock...])`: Stack of $N$ Pre-LN Transformer blocks with residual streams.
+  4. `nn.LayerNorm(embed_dim)`: Final normalization layer stabilizing output representations.
+  5. `nn.Linear(embed_dim, vocab_size, bias=False)`: Language modeling head projecting hidden states to next-token logits $(B, T, V)$.
+- **Weight Tying**: Shares parameters between `embeddings.token_embedding.weight` and `lm_head.weight`, substantially reducing parameter footprints while improving language modeling representation alignment.
+- **Initialization**: Gaussian initialization ($\mathcal{N}(0, 0.02^2)$) for linear and embedding layers; biases zeroed; LayerNorm weights initialized to 1 and biases to 0.
+- **Hardware-Calibrated 5M Baseline Parameter Count**:
+  - `vocab_size = 4096`, `block_size = 256`, `embed_dim = 256`, `num_heads = 4`, `num_layers = 5`, `weight_tying = True`.
+  - Exactly **5,051,904 unique trainable parameters (~5.05M)** perfectly matched for 6GB VRAM on the NVIDIA RTX 3050 Laptop GPU.
+- **Untrained Status**: *The model architecture is fully assembled and verified, but currently contains random initial weights.* Training pipeline optimization will occur in Step 10.
+
+### Running the Model Demo
+```powershell
+python scripts/gpt_model_demo.py
+```
+
+---
+
 ## Current Implementation Status
 
 - **Completed Steps**:
@@ -379,5 +406,6 @@ python scripts/transformer_block_demo.py
   - **Step 6 — BPE Robustness & Data Pipeline Configuration**: Strict UTF-8 decoding, hardened JSON schema validation, removal of early-stop limits, and explicit `bpe_vocab_size` configuration in `src/data.py`.
   - **Step 7 — Token Embeddings & Causal Self-Attention**: `TokenPositionEmbedding` in `src/embeddings.py`, single-head `CausalSelfAttentionHead` in `src/attention.py`, interactive demo in `scripts/attention_demo.py`, and unit test suite in `tests/test_attention.py`.
   - **Step 8 — Multi-Head Attention & Transformer Block**: `MultiHeadCausalSelfAttention` in `src/attention.py`, `FeedForward` in `src/feedforward.py`, Pre-LayerNorm `TransformerBlock` in `src/transformer_block.py`, demo in `scripts/transformer_block_demo.py`, and unit test suite in `tests/test_transformer_block.py`.
+  - **Step 9 — Complete GroundUpGPT Model Assembly**: Validated `GPTConfig` dataclass and full `GroundUpGPT` architecture in `src/model.py`, weight tying, Gaussian initialization, verified 5.05M parameter baseline, demo in `scripts/gpt_model_demo.py`, and unit test suite in `tests/test_model.py`.
 - **Pending Implementation**:
-  - *Full model stacking class (`GroundUpGPT`), weight initialization, training loop, inference engine, and full-stack chat layers are pending implementation.* Development will proceed to Step 9 upon instruction.
+  - *Full GPU training pipeline (Step 10), evaluation benchmarks, generation sampling engine, FastAPI backend, SQLite persistence, and Next.js frontend are pending implementation.* Development will proceed to Step 10 upon instruction.
