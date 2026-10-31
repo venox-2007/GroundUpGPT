@@ -68,8 +68,10 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
 | FastAPI Serving & SSE Streaming | Backend | **Implemented** | Local FastAPI server with SSE token streaming & model loader (Step 12) |
 | Evaluation & Perplexity Benchmarks | AI Engine | *Planned* | Validation loss tracking & perplexity curves |
 | Next.js / Tailwind Chat Frontend | Frontend | **Implemented** | Interactive ChatGPT-style UI with real-time SSE streaming (Step 13) |
-| SQLite Conversation Storage | Backend | *Planned* | Thread management & settings persistence |
-| User-Controllable Memory System | Experimental | *Planned* | Key facts retrieval in prompt injection |
+| Hardened Windows Launchers | Tooling | **Implemented** | Safe process identity tracking & port conflict protection (Step 13 Preflight) |
+| Real Language Modeling Corpus | AI Engine | **Implemented** | 15-book Project Gutenberg collection with zero-leak doc split (Step 14) |
+| Production BPE & Token Cache | AI Engine | *Planned* | 4096-vocab BPE tokenizer & pre-tokenized cache (Step 15) |
+| Full 5M Model Training | AI Engine | *Planned* | Bounded pretraining experiment on RTX 3050 (Step 16) |
 
 ---
 
@@ -90,11 +92,12 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
    - Step 10: Training pipeline with AdamW, mixed precision (`amp`), gradient accumulation, and checkpoint management. *(Implemented)*
    - Step 11: Autoregressive text generation, greedy decoding, temperature sampling, top-$k$, top-$p$, streaming iterator, and hardened checkpoints. *(Implemented)*
    - Step 12: Local FastAPI inference backend with real-time SSE streaming, model loader, and CORS security. *(Implemented)*
-4. **Phase 4: Full-Stack Application & Deployment** *(In Progress)*
-   - Step 13: Next.js/React frontend with streaming UI, metrics dashboard, and parameter controls. *(Implemented)*
-   - Step 14: SQLite schema and persistence for chats and runtime settings. *(Planned)*
-   - Step 15: Evaluation benchmarking, cross-entropy loss tracking, and perplexity curves.
-   - Step 16: Final portfolio packaging, comprehensive benchmarks, and deployment guide.
+4. **Phase 4: Full-Stack Application & Real Pretraining** *(In Progress)*
+   - Step 13: Next.js/React frontend with streaming UI, metrics dashboard, parameter controls, and hardened Windows launchers. *(Implemented)*
+   - Step 14: Real public-domain English corpus preparation (15 Project Gutenberg documents, deduplication, document-level train/validation split). *(Implemented)*
+   - Step 15: Production 4096-vocab BPE tokenizer and token cache. *(Planned)*
+   - Step 16: Initial training run of full 5.05M GroundUpGPT model on RTX 3050 GPU. *(Planned)*
+   - Step 17: Model evaluation, comparison, and dynamic Web UI model selection. *(Planned)*
 
 ---
 

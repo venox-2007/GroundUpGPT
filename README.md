@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-CUDA%20Accelerated-EE4C2C.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Step 13 Web Chat Ready](https://img.shields.io/badge/Status-Step%2013%20Web%20Chat%20Ready-brightgreen.svg)]()
+[![Status: Step 14 Real Corpus Prepared](https://img.shields.io/badge/Status-Step%2014%20Real%20Corpus%20Prepared-brightgreen.svg)]()
 
 GroundUpGPT is an educational and engineering project dedicated to designing, implementing, training, evaluating, and deploying a small autoregressive, decoder-only Transformer language model completely from scratch using Python and PyTorch.
 
@@ -557,8 +557,9 @@ Visit `http://localhost:3000` in your browser.
   - **Step 10 — GPU Training Infrastructure**: `Trainer` and `TrainingConfig` in `src/trainer.py`, AdamW optimizer with selective weight decay, cosine decay LR schedule with linear warmup, AMP float16 support, gradient accumulation, gradient norm clipping, architecture-checked checkpointing, smoke demo in `scripts/train_gpt.py`, and test suite in `tests/test_trainer.py`.
   - **Step 11 — Autoregressive Text Generation**: `TextGenerator` and `GenerationConfig` in `src/generation.py`, greedy decoding, temperature scaling, top-$k$, nucleus top-$p$, streaming iterator, resilient byte-level boundary decoding, checkpoint RNG/fingerprint hardening, demo in `scripts/generate_demo.py`, and test suite in `tests/test_generation.py`.
   - **Step 12 — Local FastAPI Inference Backend**: Modular `backend/` package, `GET /api/health`, `GET /api/model/info`, `POST /api/generate`, `POST /api/generate/stream`, Server-Sent Events, Pydantic v2 schemas, model startup loader, concurrency locking, and test suite in `tests/test_api.py`.
-  - **Step 13 — Web Chat Frontend**: Modern Next.js 14 App Router, React 18, TypeScript, and Tailwind CSS chat application in `frontend/`, real-time SSE streaming with `AbortController` cancellation, live token metrics, in-sidebar sampling controls, and responsive desktop/mobile interface.
+  - **Step 13 — Web Chat Frontend & Launchers**: Modern Next.js 14 App Router, React 18, TypeScript, and Tailwind CSS chat application in `frontend/`, real-time SSE streaming with `AbortController` cancellation, live token metrics, in-sidebar sampling controls, responsive interface, and hardened one-click Windows launchers (`Start GroundUpGPT.bat` and `Stop GroundUpGPT.bat`).
+  - **Step 14 — Real Language Modeling Corpus Preparation**: Reusable dataset pipeline in `src/data_prep.py` and CLI in `scripts/prepare_dataset.py`, preparing 15 classic public-domain English literary works from Project Gutenberg (5.94 MB clean text, 5.84M characters, 12 train / 3 val documents, zero-leak document-level partitioning, and complete SHA-256 manifest in `data/processed/manifest.json`).
 - **Pending Implementation**:
-  - *Persistent storage (Step 14): SQLite schema and persistence for chat history and runtime settings.*
-  - *Evaluation benchmarks (Step 15): Cross-entropy loss tracking, validation loss curves, and perplexity analysis.*
-  - *Portfolio packaging (Step 16): Final deployment guide and demo videos.*
+  - *Step 15: Production BPE Tokenizer (4,096 vocab) & Token Cache.*
+  - *Step 16: Initial Training of the Full ~5.05M GroundUpGPT Model.*
+  - *Step 17: Model Evaluation & Seamless Web UI Selection.*
