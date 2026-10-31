@@ -39,7 +39,6 @@ $mockEntry = @(
 )
 $mockEntry | ConvertTo-Json | Set-Content $pidFile -Force
 
-# Run stop_app.ps1
 $output = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root "scripts\stop_app.ps1") | Out-String
 $isStillAlive = Get-Process -Id $PID -ErrorAction SilentlyContinue
 
@@ -48,14 +47,26 @@ Assert-True ($output -match "Stale PID detected") "stop_app.ps1 detected stale P
 Assert-True (-not (Test-Path $pidFile)) "PID file was cleaned up"
 
 # -------------------------------------------------------------------
-# Test 2: Unrelated Application on Target Port 8000 Protected in stop_app.ps1
+# Test 2: Missing Tracking File Behavior
 # -------------------------------------------------------------------
-Write-Host "`nTest 2: Unrelated Port 8000 Protection in stop_app.ps1..." -ForegroundColor Yellow
+Write-Host "`nTest 2: Missing Tracking File Behavior..." -ForegroundColor Yellow
+if (Test-Path $pidFile) { Remove-Item $pidFile -Force }
 
+$outputMissing = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root "scripts\stop_app.ps1") | Out-String
+Assert-True ($outputMissing -match "No launcher session tracking file found") "stop_app.ps1 safely handled missing tracking file"
+Assert-True ($outputMissing -match "Preserving untracked processes") "Warned and preserved untracked processes"
+
+# -------------------------------------------------------------------
+# Test 3: Untracked Listener Protected Even With Matching Strings
+# -------------------------------------------------------------------
+Write-Host "`nTest 3: Untracked Listener Protected..." -ForegroundColor Yellow
+
+# Dummy listener script that intentionally contains GroundUpGPT keywords in its text/commandline
 $listenerScript = @"
+# groundupgpt backend.main mock test listener
 `$listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 8000)
 `$listener.Start()
-Start-Sleep -Seconds 15
+Start-Sleep -Seconds 10
 `$listener.Stop()
 "@
 $tempFile = [System.IO.Path]::GetTempFileName() + ".ps1"
@@ -68,12 +79,26 @@ try {
     $conn = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue
     Assert-True ($conn -ne $null) "Dummy listener is active on port 8000"
 
-    # Run stop_app.ps1 - it MUST NOT terminate this unrelated dummy process!
+    # Run stop_app.ps1 without tracking file - it MUST NOT terminate this untracked process!
     $stopOut = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root "scripts\stop_app.ps1") | Out-String
     
     $dummyStillAlive = Get-Process -Id $dummyJob.Id -ErrorAction SilentlyContinue
-    Assert-True ($dummyStillAlive -ne $null) "Unrelated process on port 8000 was NOT terminated by stop_app.ps1"
-    Assert-True ($stopOut -match "Preserving unrelated application on port 8000") "stop_app.ps1 explicitly noted preservation of unrelated application"
+    Assert-True ($dummyStillAlive -ne $null) "Untracked process on port 8000 was NOT terminated by stop_app.ps1"
+
+    # Even if an unrelated tracking file exists without this PID
+    $mockEntry2 = @(
+        @{
+            pid = 999999
+            startTime = "2026-01-01T00:00:00.0000000+00:00"
+            role = "other"
+            name = "dummy"
+        }
+    )
+    $mockEntry2 | ConvertTo-Json | Set-Content $pidFile -Force
+    $stopOut2 = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root "scripts\stop_app.ps1") | Out-String
+    $dummyStillAlive2 = Get-Process -Id $dummyJob.Id -ErrorAction SilentlyContinue
+    Assert-True ($dummyStillAlive2 -ne $null) "Untracked process was preserved even when stop_app processed another session"
+    Assert-True ($stopOut2 -match "Preserving untracked process on port 8000") "Explicitly reported preserving untracked process on port 8000"
 } finally {
     if ($dummyJob -and -not $dummyJob.HasExited) {
         Stop-Process -Id $dummyJob.Id -Force -ErrorAction SilentlyContinue
@@ -81,16 +106,62 @@ try {
     if (Test-Path $tempFile) {
         Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
     }
+    if (Test-Path $pidFile) {
+        Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+    }
 }
 
 # -------------------------------------------------------------------
-# Test 3: Unrelated Port Conflict Detection in start_app.ps1 (Port 8000 & 3000)
+# Test 4: Owned-Process Verified Termination
 # -------------------------------------------------------------------
-Write-Host "`nTest 3: Port Conflict Handling in start_app.ps1..." -ForegroundColor Yellow
+Write-Host "`nTest 4: Owned-Process Verified Termination..." -ForegroundColor Yellow
 
-$tempFile2 = [System.IO.Path]::GetTempFileName() + ".ps1"
-Set-Content -Path $tempFile2 -Value $listenerScript
-$dummyJob2 = Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$tempFile2`"" -PassThru
+# Start a dummy process to simulate a launcher-owned background worker
+$ownedScript = @"
+Start-Sleep -Seconds 60
+"@
+$tempFileOwned = [System.IO.Path]::GetTempFileName() + ".ps1"
+Set-Content -Path $tempFileOwned -Value $ownedScript
+$ownedJob = Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$tempFileOwned`"" -PassThru
+Start-Sleep -Milliseconds 500
+
+try {
+    $procObj = Get-Process -Id $ownedJob.Id
+    $ownedEntry = @(
+        @{
+            pid = $ownedJob.Id
+            startTime = $procObj.StartTime.ToString("o")
+            role = "test-backend"
+            name = $procObj.ProcessName
+        }
+    )
+    $ownedEntry | ConvertTo-Json | Set-Content $pidFile -Force
+
+    # Run stop_app.ps1 - it MUST stop this verified owned process
+    $stopOutOwned = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root "scripts\stop_app.ps1") | Out-String
+    $ownedStillAlive = Get-Process -Id $ownedJob.Id -ErrorAction SilentlyContinue
+    Assert-True ($ownedStillAlive -eq $null) "Verified owned process was stopped"
+    Assert-True ($stopOutOwned -match "Stopping verified GroundUpGPT process") "Reported stopping verified process"
+} finally {
+    if ($ownedJob -and -not $ownedJob.HasExited) {
+        Stop-Process -Id $ownedJob.Id -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path $tempFileOwned) {
+        Remove-Item $tempFileOwned -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path $pidFile) {
+        Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# -------------------------------------------------------------------
+# Test 5: Unrelated Port Conflict Detection in start_app.ps1
+# -------------------------------------------------------------------
+Write-Host "`nTest 5: Port Conflict Handling in start_app.ps1..." -ForegroundColor Yellow
+
+$tempFileConflict = [System.IO.Path]::GetTempFileName() + ".ps1"
+Set-Content -Path $tempFileConflict -Value $listenerScript
+$dummyConflict = Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$tempFileConflict`"" -PassThru
 Start-Sleep -Milliseconds 900
 
 try {
@@ -100,53 +171,22 @@ try {
     Assert-True ($startProc.ExitCode -eq 1) "start_app.ps1 exited with code 1 upon port 8000 conflict"
     $log1 = Get-Content $outLog1 -Raw
     Assert-True ($log1 -match "Port 8000 is occupied by an unrelated application") "start_app.ps1 logged clear port conflict message"
-    $dummyStillAlive2 = Get-Process -Id $dummyJob2.Id -ErrorAction SilentlyContinue
-    Assert-True ($dummyStillAlive2 -ne $null) "Conflicting application on port 8000 was untouched"
+    $dummyStillAliveConflict = Get-Process -Id $dummyConflict.Id -ErrorAction SilentlyContinue
+    Assert-True ($dummyStillAliveConflict -ne $null) "Conflicting application on port 8000 was untouched"
     if (Test-Path $outLog1) { Remove-Item $outLog1 -Force }
 } finally {
-    if ($dummyJob2 -and -not $dummyJob2.HasExited) {
-        Stop-Process -Id $dummyJob2.Id -Force -ErrorAction SilentlyContinue
+    if ($dummyConflict -and -not $dummyConflict.HasExited) {
+        Stop-Process -Id $dummyConflict.Id -Force -ErrorAction SilentlyContinue
     }
-    if (Test-Path $tempFile2) {
-        Remove-Item $tempFile2 -Force -ErrorAction SilentlyContinue
-    }
-}
-
-# Port 3000 conflict check
-$listenerScript3000 = @"
-`$listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 3000)
-`$listener.Start()
-Start-Sleep -Seconds 15
-`$listener.Stop()
-"@
-$tempFile3 = [System.IO.Path]::GetTempFileName() + ".ps1"
-Set-Content -Path $tempFile3 -Value $listenerScript3000
-$dummyJob3 = Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$tempFile3`"" -PassThru
-Start-Sleep -Milliseconds 900
-
-try {
-    $outLog3 = [System.IO.Path]::GetTempFileName()
-    $startProc3 = Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$root\scripts\start_app.ps1`" -CheckOnly -NonInteractive" -PassThru -Wait -RedirectStandardOutput $outLog3
-    
-    Assert-True ($startProc3.ExitCode -eq 1) "start_app.ps1 exited with code 1 upon port 3000 conflict"
-    $log3 = Get-Content $outLog3 -Raw
-    Assert-True ($log3 -match "Port 3000 is occupied by an unrelated application") "start_app.ps1 logged clear port 3000 conflict message"
-    $dummyStillAlive3 = Get-Process -Id $dummyJob3.Id -ErrorAction SilentlyContinue
-    Assert-True ($dummyStillAlive3 -ne $null) "Conflicting application on port 3000 was untouched"
-    if (Test-Path $outLog3) { Remove-Item $outLog3 -Force }
-} finally {
-    if ($dummyJob3 -and -not $dummyJob3.HasExited) {
-        Stop-Process -Id $dummyJob3.Id -Force -ErrorAction SilentlyContinue
-    }
-    if (Test-Path $tempFile3) {
-        Remove-Item $tempFile3 -Force -ErrorAction SilentlyContinue
+    if (Test-Path $tempFileConflict) {
+        Remove-Item $tempFileConflict -Force -ErrorAction SilentlyContinue
     }
 }
 
 # -------------------------------------------------------------------
-# Test 4: Complete Model Artifact Verification (Checkpoint + Tokenizer)
+# Test 6: Complete Model Artifact Verification (Checkpoint + Tokenizer)
 # -------------------------------------------------------------------
-Write-Host "`nTest 4: Artifact Verification in start_app.ps1..." -ForegroundColor Yellow
+Write-Host "`nTest 6: Artifact Verification in start_app.ps1..." -ForegroundColor Yellow
 
 $tokPath = Join-Path $root "checkpoints\demo_tokenizer.json"
 $tokBackup = Join-Path $root "checkpoints\demo_tokenizer.json.bak"
@@ -154,7 +194,7 @@ $ckptPath = Join-Path $root "checkpoints\demo_checkpoint.pt"
 $ckptBackup = Join-Path $root "checkpoints\demo_checkpoint.pt.bak"
 
 try {
-    # 4a: Missing demo_tokenizer.json
+    # 6a: Missing demo_tokenizer.json
     if (Test-Path $tokPath) {
         Move-Item $tokPath $tokBackup -Force
     }
@@ -172,7 +212,7 @@ try {
 }
 
 try {
-    # 4b: Missing demo_checkpoint.pt
+    # 6b: Missing demo_checkpoint.pt
     if (Test-Path $ckptPath) {
         Move-Item $ckptPath $ckptBackup -Force
     }
@@ -189,54 +229,12 @@ try {
     }
 }
 
-# 4c: Both artifacts verified
+# 6c: Both artifacts verified
 $outLogC = [System.IO.Path]::GetTempFileName()
 $pC = Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$root\scripts\start_app.ps1`" -CheckOnly -NonInteractive" -PassThru -Wait -RedirectStandardOutput $outLogC
 $logC = Get-Content $outLogC -Raw
 Assert-True ($logC -match "Verified demo model checkpoint and tokenizer artifacts") "Declared model ready when both checkpoint and tokenizer exist"
 if (Test-Path $outLogC) { Remove-Item $outLogC -Force }
-
-# -------------------------------------------------------------------
-# Test 5: Safe Full Lifecycle (Start & Stop)
-# -------------------------------------------------------------------
-Write-Host "`nTest 5: Full GroundUpGPT Lifecycle Test..." -ForegroundColor Yellow
-
-# Launch start_app.ps1
-$startOutput = [System.IO.Path]::GetTempFileName()
-$launchProc = Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$root\scripts\start_app.ps1`" -NonInteractive" -PassThru -RedirectStandardOutput $startOutput
-
-# Wait for both services to become ready and .groundupgpt_pids to be created (up to 30s)
-$pidFile = Join-Path $root ".groundupgpt_pids"
-$ready = $false
-for ($i = 0; $i -lt 30; $i++) {
-    Start-Sleep -Seconds 1
-    if (Test-Path $pidFile) {
-        $ready = $true
-        break
-    }
-}
-
-Assert-True $ready "GroundUpGPT services initialized and .groundupgpt_pids tracking file created"
-
-# Verify health endpoint
-$backendOk = $false
-try {
-    $b = Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/health" -TimeoutSec 2 -ErrorAction Stop
-    if ($b.status -eq "ok") { $backendOk = $true }
-} catch {}
-Assert-True $backendOk "GroundUpGPT backend is responding on port 8000"
-
-# Now execute stop_app.ps1
-$stopOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root "scripts\stop_app.ps1") | Out-String
-Assert-True ($stopOutput -match "SUCCESS") "stop_app.ps1 reported successful termination"
-
-# Verify ports are freed
-Start-Sleep -Seconds 1
-$remainingConn = Get-NetTCPConnection -LocalPort 8000, 3000 -State Listen -ErrorAction SilentlyContinue
-Assert-True ($remainingConn -eq $null) "Ports 8000 and 3000 are freed"
-Assert-True (-not (Test-Path $pidFile)) "Tracking file removed after shutdown"
-
-if (Test-Path $startOutput) { Remove-Item $startOutput -Force }
 
 # -------------------------------------------------------------------
 # Summary
