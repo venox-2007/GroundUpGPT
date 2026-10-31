@@ -175,6 +175,8 @@ class Trainer:
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(config.seed)
         self.rng_generator: torch.Generator = torch.Generator().manual_seed(config.seed)
+        # Dedicated evaluation generator isolated from training batch sampling
+        self.eval_rng_generator: torch.Generator = torch.Generator().manual_seed(config.seed + 10000)
 
     def get_lr_for_step(self, step: int) -> float:
         """Compute learning rate using linear warmup followed by cosine decay.
@@ -227,7 +229,7 @@ class Trainer:
                     batch_size=self.config.batch_size,
                     block_size=self.config.block_size,
                     device=self.device,
-                    generator=self.rng_generator,
+                    generator=self.eval_rng_generator,
                 )
                 with autocast(device_type="cuda" if self.device.startswith("cuda") else "cpu", enabled=self.use_amp):
                     _, loss = self.model(x, targets=y)
@@ -267,6 +269,7 @@ class Trainer:
             "rng_state": torch.get_rng_state(),
             "cuda_rng_state": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
             "pipeline_rng_state": self.rng_generator.get_state(),
+            "eval_rng_state": self.eval_rng_generator.get_state(),
         }
         torch.save(checkpoint, path)
 
@@ -349,6 +352,8 @@ class Trainer:
             torch.cuda.set_rng_state_all([s.cpu() for s in checkpoint["cuda_rng_state"]])
         if "pipeline_rng_state" in checkpoint:
             self.rng_generator.set_state(checkpoint["pipeline_rng_state"].cpu())
+        if "eval_rng_state" in checkpoint:
+            self.eval_rng_generator.set_state(checkpoint["eval_rng_state"].cpu())
 
         self.current_step = int(checkpoint["step"])
         return self.current_step
