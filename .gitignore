@@ -1,0 +1,51 @@
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# Datasets & Preprocessed Data
+# Keep directory structure via .gitkeep
+data/*
+!data/.gitkeep
+
+# Model Checkpoints, Weights & Artifacts
+checkpoints/
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.ckpt
+*.onnx
+
+# Training Runs, Logs & Profiling
+logs/
+wandb/
+runs/
+*.log
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE, Editor & OS Files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+[Dd]esktop.ini
+
+# Scratchpad / Local Experimentation
+scratch/

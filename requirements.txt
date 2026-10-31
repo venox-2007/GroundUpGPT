@@ -1,0 +1,14 @@
+# GroundUpGPT Core Dependencies
+#
+# NOTE: For GPU acceleration on Windows with NVIDIA CUDA, install PyTorch
+# using the official PyTorch wheel repository prior to or alongside requirements:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu124
+#
+# Base dependencies:
+torch>=2.2.0
+numpy>=1.24.0
+pyyaml>=6.0.0
+tqdm>=4.66.0
+
+# Development & Testing
+pytest>=8.0.0
