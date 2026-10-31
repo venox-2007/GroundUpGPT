@@ -71,7 +71,7 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
 | Hardened Windows Launchers | Tooling | **Implemented** | Safe process identity tracking & port conflict protection (Step 13 Preflight) |
 | Real Language Modeling Corpus | AI Engine | **Implemented** | 15-book Project Gutenberg collection with zero-leak doc split (Step 14) |
 | Production BPE & Token Cache | AI Engine | **Implemented** | 4096-vocab BPE tokenizer & pre-tokenized cache with causal shifts (Step 15) |
-| Full 5M Model Training | AI Engine | *Planned* | Bounded pretraining experiment on RTX 3050 (Step 16) |
+| Full 5M Model Training | AI Engine | **Implemented** | Bounded pretraining experiment on RTX 3050 (Step 16) |
 
 ---
 
@@ -96,7 +96,7 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
    - Step 13: Next.js/React frontend with streaming UI, metrics dashboard, parameter controls, and hardened Windows launchers. *(Implemented)*
    - Step 14: Real public-domain English corpus preparation (15 Project Gutenberg documents, deduplication, document-level train/validation split). *(Implemented)*
    - Step 15: Production 4096-vocab BPE tokenizer, O(N) linked-list/heap merges, and persistent pre-tokenized cache. *(Implemented)*
-   - Step 16: Initial training run of full 5.05M GroundUpGPT model on RTX 3050 GPU. *(Planned)*
+   - Step 16: Initial training run of full 5.05M GroundUpGPT model on RTX 3050 GPU (200 steps, 3.28M tokens, loss dropped 8.35 -> 5.86). *(Implemented)*
    - Step 17: Model evaluation, comparison, and dynamic Web UI model selection. *(Planned)*
 
 ---

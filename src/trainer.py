@@ -398,30 +398,61 @@ class Trainer:
         self.current_step += 1
         return accum_loss
 
-    def train(self) -> Dict[str, Any]:
-        """Run full training loop up to config.max_steps.
+    def train(
+        self,
+        stop_after_steps: Optional[int] = None,
+        time_budget_seconds: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Run training loop up to config.max_steps or bounded stop_after_steps / time_budget_seconds.
+
+        Args:
+            stop_after_steps: If specified, stop training upon reaching this step count,
+                allowing resuming later without altering the global learning rate schedule.
+            time_budget_seconds: If specified, stop training if elapsed time exceeds budget.
 
         Returns:
-            Dict[str, Any]: Final training metrics and history summary.
+            Dict[str, Any]: Detailed training experiment metrics and history.
         """
+        target_step = self.config.max_steps
+        if stop_after_steps is not None:
+            target_step = min(self.config.max_steps, stop_after_steps)
+
         print(f"Starting training on device: {self.device} (AMP: {self.use_amp})")
-        print(f"Total steps: {self.config.max_steps}, Accumulation: {self.config.grad_accum_steps}")
+        print(f"Global schedule max_steps: {self.config.max_steps} | Target step for this run: {target_step}")
+        print(f"Micro-batch size: {self.config.batch_size}, Context: {self.config.block_size}, Accumulation: {self.config.grad_accum_steps}")
 
         start_time = time.time()
-        last_eval_loss: Dict[str, float] = self.estimate_loss()
-        print(f"Initial Loss - Train: {last_eval_loss['train']:.4f}, Val: {last_eval_loss['val']:.4f}")
+        initial_eval: Dict[str, float] = self.estimate_loss()
+        print(f"Initial Loss - Train: {initial_eval['train']:.4f}, Val: {initial_eval['val']:.4f}")
 
-        step_losses: list[float] = []
+        history: list[dict[str, Any]] = [
+            {
+                "step": self.current_step,
+                "train_loss": initial_eval["train"],
+                "val_loss": initial_eval["val"],
+                "lr": self.get_lr_for_step(self.current_step),
+                "time_sec": 0.0,
+            }
+        ]
 
-        while self.current_step < self.config.max_steps:
+        stopped_due_to_time: bool = False
+        initial_step = self.current_step
+
+        while self.current_step < target_step:
             step = self.current_step
             loss = self.train_step()
-            step_losses.append(loss)
+
+            elapsed = time.time() - start_time
+            if time_budget_seconds is not None and elapsed >= time_budget_seconds:
+                print(f"[!] Time budget reached ({elapsed:.1f}s >= {time_budget_seconds}s). Stopping run safely.")
+                stopped_due_to_time = True
+                break
 
             # Evaluation Interval
-            if self.current_step % self.config.eval_interval == 0:
+            if self.current_step % self.config.eval_interval == 0 or self.current_step == target_step:
                 eval_loss = self.estimate_loss()
-                lr = self.get_lr_for_step(step)
+                lr = self.get_lr_for_step(self.current_step)
+                peak_vram_mb = 0.0
                 vram_info = ""
                 if self.device.startswith("cuda"):
                     peak_vram_mb = torch.cuda.max_memory_allocated(self.device) / (1024 * 1024)
@@ -433,21 +464,48 @@ class Trainer:
                     f"Train Loss: {eval_loss['train']:.4f} | "
                     f"Val Loss: {eval_loss['val']:.4f}{vram_info}"
                 )
-                last_eval_loss = eval_loss
+                history.append(
+                    {
+                        "step": self.current_step,
+                        "train_loss": eval_loss["train"],
+                        "val_loss": eval_loss["val"],
+                        "lr": lr,
+                        "time_sec": round(elapsed, 2),
+                        "peak_vram_mb": round(peak_vram_mb, 1),
+                    }
+                )
 
             # Checkpoint Interval
             if self.current_step % self.config.checkpoint_interval == 0:
                 ckpt_path = self.checkpoint_dir / f"step_{self.current_step}.pt"
-                self.save_checkpoint(ckpt_path, val_loss=last_eval_loss.get("val"))
+                last_val = history[-1]["val_loss"] if history else None
+                self.save_checkpoint(ckpt_path, val_loss=last_val)
 
-        total_time = time.time() - start_time
+        total_time = max(0.001, time.time() - start_time)
         final_eval = self.estimate_loss()
+
+        steps_completed = self.current_step - initial_step
+        tokens_per_step = self.config.batch_size * self.config.block_size * self.config.grad_accum_steps
+        tokens_processed = steps_completed * tokens_per_step
+        tokens_per_sec = tokens_processed / total_time
+
+        # Save final / bounded checkpoint
+        final_ckpt = self.checkpoint_dir / f"step_{self.current_step}.pt"
+        self.save_checkpoint(final_ckpt, val_loss=final_eval["val"])
 
         return {
             "total_steps": self.current_step,
+            "steps_this_run": steps_completed,
             "total_time_seconds": round(total_time, 2),
+            "tokens_processed": tokens_processed,
+            "tokens_per_second": round(tokens_per_sec, 1),
+            "initial_train_loss": initial_eval["train"],
+            "initial_val_loss": initial_eval["val"],
             "final_train_loss": final_eval["train"],
             "final_val_loss": final_eval["val"],
+            "final_checkpoint": str(final_ckpt),
+            "stopped_due_to_time": stopped_due_to_time,
             "device": self.device,
             "mixed_precision": self.use_amp,
+            "history": history,
         }

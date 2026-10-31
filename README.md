@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-CUDA%20Accelerated-EE4C2C.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Step 15 BPE & Token Cache Ready](https://img.shields.io/badge/Status-Step%2015%20BPE%20%26%20Token%20Cache%20Ready-brightgreen.svg)]()
+[![Status: Step 16 Initial 5M Model Trained](https://img.shields.io/badge/Status-Step%2016%20Initial%205M%20Model%20Trained-brightgreen.svg)]()
 
 GroundUpGPT is an educational and engineering project dedicated to designing, implementing, training, evaluating, and deploying a small autoregressive, decoder-only Transformer language model completely from scratch using Python and PyTorch.
 
@@ -560,6 +560,6 @@ Visit `http://localhost:3000` in your browser.
   - **Step 13 — Web Chat Frontend & Launchers**: Modern Next.js 14 App Router, React 18, TypeScript, and Tailwind CSS chat application in `frontend/`, real-time SSE streaming with `AbortController` cancellation, live token metrics, in-sidebar sampling controls, responsive interface, and hardened one-click Windows launchers (`Start GroundUpGPT.bat` and `Stop GroundUpGPT.bat`).
   - **Step 14 — Real Language Modeling Corpus Preparation**: Reusable dataset pipeline in `src/data_prep.py` and CLI in `scripts/prepare_dataset.py`, preparing 15 classic public-domain English literary works from Project Gutenberg (5.94 MB clean text, 5.84M characters, 12 train / 3 val documents, zero-leak document-level partitioning, and complete SHA-256 manifest in `data/processed/manifest.json`).
   - **Step 15 — Production BPE Tokenizer and Token Cache**: Fitted production 4,096-vocabulary byte-level BPE tokenizer on training documents (`checkpoints/bpe_vocab4096.json`, fingerprint `4138461786ea6a199ff232b2427f3cb71c60f351afa7241f75f8196e51bdae72`), optimized O(N) linked-list/heap merge algorithm, memoized piece encoding, and pre-tokenized binary token caches in `data/cache/` (1,361,831 train tokens, 168,741 val tokens, 3.89x compression ratio, and `PretokenizedDataPipeline` with causal one-token shifts).
+  - **Step 16 — Initial Training of Full 5.05M GroundUpGPT Model**: Scaled training experiment using `scripts/train_5m_gpt.py`, processing 3,276,800 tokens over 200 optimization steps (effective batch size 64, context length 256) on an NVIDIA RTX 3050 6GB Laptop GPU. Cross-entropy loss successfully decreased from 8.3522 (near theoretical random uniform baseline of ln(4096) ≈ 8.318) down to 5.8608 train / 6.1189 validation at 37,009.3 tokens/sec with peak VRAM footprint of only 744.7 MB. Saved checkpoint `checkpoints/5m_initial/model_5m_step200.pt` and documented training dynamics.
 - **Pending Implementation**:
-  - *Step 16: Initial Training of the Full ~5.05M GroundUpGPT Model.*
   - *Step 17: Model Evaluation & Seamless Web UI Selection.*
