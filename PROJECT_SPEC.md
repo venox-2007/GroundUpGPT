@@ -65,10 +65,10 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
 | Complete GroundUpGPT Model Class | AI Engine | **Implemented** | Stacked Pre-LN blocks, final LayerNorm, LM head, weight tying (Step 9) |
 | Training Loop & LR Scheduler | AI Engine | **Implemented** | AdamW, warmup, cosine decay, AMP fp16, gradient accumulation, checkpointing (Step 10) |
 | Autoregressive Generation Engine | AI Engine | **Implemented** | Greedy decoding, temperature, top-$k$, top-$p$, streaming iterator (Step 11) |
+| FastAPI Serving & SSE Streaming | Backend | **Implemented** | Local FastAPI server with SSE token streaming & model loader (Step 12) |
 | Evaluation & Perplexity Benchmarks | AI Engine | *Planned* | Validation loss tracking & perplexity curves |
-| FastAPI Serving & SSE Streaming | Backend | *Planned* | Non-blocking token generator |
 | SQLite Conversation Storage | Backend | *Planned* | Thread management & settings persistence |
-| Next.js / Tailwind Chat Frontend | Frontend | *Planned* | Interactive ChatGPT-style UI |
+| Next.js / Tailwind Chat Frontend | Frontend | *Planned* | Interactive ChatGPT-style UI (Step 13) |
 | User-Controllable Memory System | Experimental | *Planned* | Key facts retrieval in prompt injection |
 
 ---
@@ -89,11 +89,11 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
 3. **Phase 3: Optimization, Training & Evaluation** *(In Progress)*
    - Step 10: Training pipeline with AdamW, mixed precision (`amp`), gradient accumulation, and checkpoint management. *(Implemented)*
    - Step 11: Autoregressive text generation, greedy decoding, temperature sampling, top-$k$, top-$p$, streaming iterator, and hardened checkpoints. *(Implemented)*
-   - Step 12: Local FastAPI serving, SSE streaming endpoints, and state persistence.
+   - Step 12: Local FastAPI inference backend with real-time SSE streaming, model loader, and CORS security. *(Implemented)*
 4. **Phase 4: Full-Stack Application & Deployment** *(Planned)*
-   - Step 13: FastAPI backend with Server-Sent Events (SSE) streaming.
+   - Step 13: Next.js/React frontend with streaming UI, metrics dashboard, and parameter controls.
    - Step 14: SQLite schema and persistence for chats and runtime settings.
-   - Step 15: Next.js/React frontend with streaming UI, metrics dashboard, and parameter controls.
+   - Step 15: Evaluation benchmarking, cross-entropy loss tracking, and perplexity curves.
    - Step 16: Final portfolio packaging, comprehensive benchmarks, and deployment guide.
 
 ---

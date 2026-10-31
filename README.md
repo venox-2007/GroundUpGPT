@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-CUDA%20Accelerated-EE4C2C.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Step 11 Generation Ready](https://img.shields.io/badge/Status-Step%2011%20Generation%20Ready-brightgreen.svg)]()
+[![Status: Step 12 Backend Ready](https://img.shields.io/badge/Status-Step%2012%20Backend%20Ready-brightgreen.svg)]()
 
 GroundUpGPT is an educational and engineering project dedicated to designing, implementing, training, evaluating, and deploying a small autoregressive, decoder-only Transformer language model completely from scratch using Python and PyTorch.
 
@@ -35,6 +35,7 @@ GroundUpGPT is an educational and engineering project dedicated to designing, im
 - [Complete GroundUpGPT Model Architecture](#complete-groundupgpt-model-architecture)
 - [GPU Training Infrastructure & Optimizer](#gpu-training-infrastructure--optimizer)
 - [Autoregressive Text Generation & Streaming Engine](#autoregressive-text-generation--streaming-engine)
+- [Local FastAPI Inference Backend & SSE Streaming](#local-fastapi-inference-backend--sse-streaming)
 - [Current Implementation Status](#current-implementation-status)
 
 ---
@@ -190,9 +191,13 @@ The project follows a phased, test-driven development plan:
   - Resilient byte-level BPE boundary decoding preventing crashes on incomplete multi-byte Unicode.
   - Checkpoint hardening: RNG state preservation, deterministic tokenizer fingerprinting, and complete architectural validation.
   - Interactive generation demo script (`scripts/generate_demo.py`) and test suite (`tests/test_generation.py`).
-- [ ] **Step 12: Full-Stack Application (FastAPI, SQLite, Next.js UI)**
-  - REST/SSE streaming backend and responsive ChatGPT-inspired interface.
-  - Final documentation, benchmark summaries, and sample generation logs.
+- [x] **Step 12: Local FastAPI Inference Backend & SSE Streaming**
+  - Modular backend package (`backend/`) powered by FastAPI, Pydantic, and Uvicorn.
+  - Endpoints: `GET /api/health`, `GET /api/model/info`, `POST /api/generate`, `POST /api/generate/stream`.
+  - Inference-only `ModelManager` loading model once at startup, validating tokenizer fingerprint, and serializing execution via `asyncio.Lock`.
+  - Real-time Server-Sent Events (SSE) with `token`, `done`, and `error` events and graceful client disconnect handling.
+  - Secure local CORS configuration, configurable environment settings (`.env.example`), and targeted test suite (`tests/test_api.py`).
+- [ ] **Step 13: Web Chat Frontend (Next.js & Tailwind)**
 
 ---
 
@@ -450,6 +455,40 @@ python scripts/generate_demo.py
 
 ---
 
+## Local FastAPI Inference Backend & SSE Streaming
+
+Step 12 builds a robust, modular local serving architecture in `backend/` powered by FastAPI, Pydantic v2, and Uvicorn:
+- **Backend Architecture**:
+  - `backend/config.py`: Centralized configuration loading host, port, artifact paths, CORS origins, and safety limits from environment variables (`.env.example` provided).
+  - `backend/schemas.py`: Strict Pydantic models for request validation (`GenerateRequest`) and structured responses (`GenerateResponse`, `ModelInfoResponse`, `HealthResponse`).
+  - `backend/model_loader.py`: Inference-only `ModelManager` that loads the model checkpoint and tokenizer once at startup, strictly validates architecture and tokenizer SHA-256 fingerprints, and serializes inference execution via `asyncio.Lock` to avoid GPU memory collision.
+  - `backend/app.py`: FastAPI server exposing health, metadata, generation, and streaming routes.
+  - `backend/main.py`: Executable CLI launcher for starting the Uvicorn server locally.
+- **REST & SSE Endpoints**:
+  - `GET /api/health`: Reports server operational status, whether a model is loaded, the active device, and package version.
+  - `GET /api/model/info`: Exposes full model hyperparameters, parameter counts, context limits, tokenizer type, and checkpoint provenance.
+  - `POST /api/generate`: Executes synchronous autoregressive generation, returning full text alongside prompt/generated token counts, elapsed time, throughput, and context usage telemetry.
+  - `POST /api/generate/stream`: Real-time Server-Sent Events (SSE) streaming yielding incremental `token` events as characters are predicted, followed by a final `done` event with complete telemetry, with graceful cancellation if the client disconnects.
+- **Security & Concurrency Discipline**:
+  - Binds strictly to `127.0.0.1` by default.
+  - Restricts CORS to designated local origins (`http://localhost:3000`, `http://127.0.0.1:3000`).
+  - Rejects arbitrary remote filesystem paths or checkpoint uploads via API.
+
+### Running the Inference Backend Locally
+```powershell
+# 1. Ensure demo model artifacts are generated
+python scripts/generate_demo.py
+
+# 2. Start the FastAPI backend
+python -m backend.main
+
+# Or run via Uvicorn directly:
+uvicorn backend.app:app --host 127.0.0.1 --port 8000
+```
+- Interactive Swagger UI: `http://127.0.0.1:8000/docs`
+
+---
+
 ## Current Implementation Status
 
 - **Completed Steps**:
@@ -464,5 +503,6 @@ python scripts/generate_demo.py
   - **Step 9 — Complete GroundUpGPT Model Assembly**: Validated `GPTConfig` dataclass and full `GroundUpGPT` architecture in `src/model.py`, weight tying, Gaussian initialization, verified 5.05M parameter baseline, demo in `scripts/gpt_model_demo.py`, and unit test suite in `tests/test_model.py`.
   - **Step 10 — GPU Training Infrastructure**: `Trainer` and `TrainingConfig` in `src/trainer.py`, AdamW optimizer with selective weight decay, cosine decay LR schedule with linear warmup, AMP float16 support, gradient accumulation, gradient norm clipping, architecture-checked checkpointing, smoke demo in `scripts/train_gpt.py`, and test suite in `tests/test_trainer.py`.
   - **Step 11 — Autoregressive Text Generation**: `TextGenerator` and `GenerationConfig` in `src/generation.py`, greedy decoding, temperature scaling, top-$k$, nucleus top-$p$, streaming iterator, resilient byte-level boundary decoding, checkpoint RNG/fingerprint hardening, demo in `scripts/generate_demo.py`, and test suite in `tests/test_generation.py`.
+  - **Step 12 — Local FastAPI Inference Backend**: Modular `backend/` package, `GET /api/health`, `GET /api/model/info`, `POST /api/generate`, `POST /api/generate/stream`, Server-Sent Events, Pydantic v2 schemas, model startup loader, concurrency locking, and test suite in `tests/test_api.py`.
 - **Pending Implementation**:
-  - *Full-stack application (Step 12): FastAPI backend with Server-Sent Events (SSE) streaming, SQLite thread persistence, and Next.js / Tailwind interactive chat frontend.* Development will proceed to Step 12 upon instruction.
+  - *Web chat frontend (Step 13): Responsive Next.js / Tailwind ChatGPT-inspired interface, SQLite conversation thread persistence, and experimental memory controls.* Development will proceed to Step 13 upon instruction.

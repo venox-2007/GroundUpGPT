@@ -157,7 +157,10 @@ def test_context_window_cropping(
 
     assert len(result.generated_token_ids) == 20
     assert len(result.all_token_ids) == 30
-    assert result.context_usage_ratio == 30 / 16
+    assert result.active_context_tokens == 16
+    assert result.context_limit == 16
+    assert result.context_cropped is True
+    assert result.context_usage_ratio == 1.0
 
 
 def test_no_gradient_tracking_during_inference(

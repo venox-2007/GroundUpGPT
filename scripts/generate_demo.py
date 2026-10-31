@@ -48,11 +48,16 @@ def main() -> None:
     print(f"[1] Loading dataset fixture: {fixture_path.relative_to(REPO_ROOT)}")
     text_corpus = fixture_path.read_text(encoding="utf-8")
 
-    tokenizer = BPETokenizer()
-    tokenizer.fit(text_corpus, target_vocab_size=280)
-    print(f"    Fitted BPETokenizer: vocab_size={tokenizer.vocab_size}")
+    # Split text corpus first: fit BPE tokenizer strictly on the training partition only
+    train_ratio = 0.9
+    split_idx = int(len(text_corpus) * train_ratio)
+    train_text = text_corpus[:split_idx]
 
-    pipeline = TextDataPipeline(text=text_corpus, tokenizer=tokenizer, train_ratio=0.9)
+    tokenizer = BPETokenizer()
+    tokenizer.fit(train_text, target_vocab_size=280)
+    print(f"    Fitted BPETokenizer on train partition only: vocab_size={tokenizer.vocab_size}")
+
+    pipeline = TextDataPipeline(text=text_corpus, tokenizer=tokenizer, train_ratio=train_ratio)
 
     # 2. Model Initialization
     model_cfg = GPTConfig(
@@ -114,7 +119,7 @@ def main() -> None:
     print(f"Full completion:    {greedy_res.full_text!r}")
     print(f"Tokens:             {greedy_res.prompt_tokens} prompt + {greedy_res.generated_tokens} generated = {len(greedy_res.all_token_ids)} total")
     print(f"Throughput:         {greedy_res.tokens_per_second:.1f} tokens/sec ({greedy_res.elapsed_time_sec * 1000:.2f} ms)")
-    print(f"Context usage:      {greedy_res.context_usage_ratio * 100:.1f}% of block_size ({model_cfg.block_size})")
+    print(f"Active context:     {greedy_res.active_context_tokens}/{greedy_res.context_limit} tokens ({greedy_res.context_usage_ratio * 100:.1f}%), cropped={greedy_res.context_cropped}")
 
     # 6. Stochastic Generation (temperature = 0.8, top_k = 10, top_p = 0.9, seed = 42)
     print("\n" + "-" * 75)

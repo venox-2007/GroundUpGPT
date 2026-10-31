@@ -1,0 +1,86 @@
+"""Pydantic data models for API request and response serialization."""
+
+from typing import Optional
+from pydantic import BaseModel, Field
+
+
+class GenerateRequest(BaseModel):
+    """Parameters for autoregressive text generation."""
+
+    prompt: str = Field(
+        ...,
+        min_length=1,
+        max_length=2048,
+        description="Input text prompt to condition autoregressive generation.",
+    )
+    max_new_tokens: int = Field(
+        default=50,
+        ge=1,
+        le=512,
+        description="Maximum number of new tokens to generate past prompt.",
+    )
+    temperature: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=2.0,
+        description="Softmax temperature (>0.0 for sampling, 0.0 for greedy argmax).",
+    )
+    top_k: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Top-k filtering threshold (keeps top k probability tokens).",
+    )
+    top_p: Optional[float] = Field(
+        default=None,
+        gt=0.0,
+        le=1.0,
+        description="Nucleus top-p filtering threshold (cumulative probability mass).",
+    )
+    seed: Optional[int] = Field(
+        default=None,
+        description="Optional seed for deterministic pseudo-random sampling.",
+    )
+
+
+class GenerateResponse(BaseModel):
+    """Complete generation output and execution telemetry."""
+
+    prompt: str
+    generated_text: str
+    full_text: str
+    prompt_tokens: int
+    generated_tokens: int
+    total_tokens: int
+    active_context_tokens: int
+    context_limit: int
+    context_cropped: bool
+    elapsed_time_sec: float
+    tokens_per_second: float
+
+
+class ModelInfoResponse(BaseModel):
+    """Architectural metadata and checkpoint information for loaded model."""
+
+    model_name: str
+    vocab_size: int
+    block_size: int
+    embed_dim: int
+    num_heads: int
+    num_layers: int
+    weight_tying: bool
+    total_parameters: int
+    tokenizer_type: str
+    tokenizer_vocab_size: int
+    tokenizer_fingerprint: str
+    device: str
+    checkpoint_step: Optional[int] = None
+    checkpoint_val_loss: Optional[float] = None
+
+
+class HealthResponse(BaseModel):
+    """API health and server operational status."""
+
+    status: str
+    model_loaded: bool
+    device: str
+    version: str

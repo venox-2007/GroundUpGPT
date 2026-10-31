@@ -81,7 +81,10 @@ class GenerationResult:
         generated_tokens: Total count of generated tokens.
         elapsed_time_sec: Wall-clock generation duration in seconds.
         tokens_per_second: Generation throughput in tokens per second.
-        context_usage_ratio: Ratio of total tokens to model block_size.
+        context_usage_ratio: Ratio of active context tokens to model block_size (clamped <= 1.0).
+        active_context_tokens: Number of tokens currently in the active attention window.
+        context_limit: The model's maximum context length (block_size).
+        context_cropped: Whether sequence length exceeded block_size and older tokens were cropped.
     """
 
     prompt: str
@@ -95,6 +98,9 @@ class GenerationResult:
     elapsed_time_sec: float
     tokens_per_second: float
     context_usage_ratio: float
+    active_context_tokens: int = 0
+    context_limit: int = 0
+    context_cropped: bool = False
 
 
 def sample_next_token(
@@ -365,7 +371,10 @@ class TextGenerator:
         if len(prompt_ids) == 0:
             raise ValueError("Prompt yielded 0 token IDs.")
 
+        block_size = self.model.config.block_size
         if cfg.max_new_tokens == 0:
+            total_prompt_tokens = len(prompt_ids)
+            active_ctx = min(total_prompt_tokens, block_size)
             return GenerationResult(
                 prompt=prompt,
                 generated_text="",
@@ -373,11 +382,14 @@ class TextGenerator:
                 prompt_token_ids=prompt_ids,
                 generated_token_ids=[],
                 all_token_ids=prompt_ids,
-                prompt_tokens=len(prompt_ids),
+                prompt_tokens=total_prompt_tokens,
                 generated_tokens=0,
                 elapsed_time_sec=0.0,
                 tokens_per_second=0.0,
-                context_usage_ratio=len(prompt_ids) / self.model.config.block_size,
+                context_usage_ratio=active_ctx / block_size,
+                active_context_tokens=active_ctx,
+                context_limit=block_size,
+                context_cropped=(total_prompt_tokens > block_size),
             )
 
         start_time = time.perf_counter()
@@ -390,12 +402,17 @@ class TextGenerator:
 
         elapsed_time = time.perf_counter() - start_time
         all_ids = prompt_ids + generated_ids
+        total_tokens = len(all_ids)
+
+        # Distinguish session/sequence total from active attention window
+        active_context_tokens = min(total_tokens, block_size)
+        context_cropped = (total_tokens > block_size)
+        context_usage = active_context_tokens / block_size
 
         # Safely decode full generated text
         generated_text = "".join(streamed_chunks)
         full_text = prompt + generated_text
         tokens_per_second = len(generated_ids) / max(elapsed_time, 1e-9)
-        context_usage = len(all_ids) / self.model.config.block_size
 
         return GenerationResult(
             prompt=prompt,
@@ -409,4 +426,7 @@ class TextGenerator:
             elapsed_time_sec=elapsed_time,
             tokens_per_second=tokens_per_second,
             context_usage_ratio=context_usage,
+            active_context_tokens=active_context_tokens,
+            context_limit=block_size,
+            context_cropped=context_cropped,
         )
