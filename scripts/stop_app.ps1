@@ -1,63 +1,115 @@
+# GroundUpGPT Shutdown Script
 $ErrorActionPreference = 'SilentlyContinue'
 $root = Split-Path -Parent $PSScriptRoot
 
 Write-Host '=====================================================================' -ForegroundColor Cyan
-Write-Host ' GroundUpGPT — Service Shutdown' -ForegroundColor Cyan
+Write-Host ' GroundUpGPT — Safe Service Shutdown' -ForegroundColor Cyan
 Write-Host '=====================================================================' -ForegroundColor Cyan
 Write-Host ''
 
-$pidsToKill = @()
+function Test-IsGroundUpGPTProcess {
+    param([int]$procId)
+    if ($procId -le 4) { return $false }
+    try {
+        $p = Get-CimInstance Win32_Process -Filter ("ProcessId = " + $procId) -ErrorAction SilentlyContinue
+        if (-not $p) { return $false }
+        $cmdLine = if ($p.CommandLine) { $p.CommandLine.ToLower() } else { "" }
+        $exePath = if ($p.ExecutablePath) { $p.ExecutablePath.ToLower() } else { "" }
+        $rootLower = $root.ToLower()
+
+        if ($exePath.StartsWith($rootLower)) { return $true }
+        if ($cmdLine.Contains($rootLower)) { return $true }
+        if ($cmdLine.Contains("backend.main")) { return $true }
+        if ($cmdLine.Contains("groundupgpt")) { return $true }
+        if ($cmdLine.Contains("next") -and $cmdLine.Contains("frontend")) { return $true }
+        return $false
+    } catch {
+        return $false
+    }
+}
+
+$stoppedCount = 0
 $pidFile = Join-Path $root '.groundupgpt_pids'
 
-# 1. Read stored PIDs from previous startup
+# 1. Stop tracked GroundUpGPT processes with StartTime and identity verification
 if (Test-Path $pidFile) {
-    Get-Content $pidFile | ForEach-Object {
-        if ($_ -match 'PID=(\d+)') {
-            $p = [int]$matches[1]
-            if ($p -gt 0) { $pidsToKill += $p }
+    try {
+        $raw = Get-Content $pidFile -Raw -ErrorAction SilentlyContinue
+        if ($raw) {
+            $entries = $raw | ConvertFrom-Json -ErrorAction SilentlyContinue
+            if ($entries) {
+                $list = @($entries)
+                foreach ($entry in $list) {
+                    $pidNum = [int]$entry.pid
+                    if ($pidNum -le 4) { continue }
+
+                    $proc = Get-Process -Id $pidNum -ErrorAction SilentlyContinue
+                    if (-not $proc) {
+                        # Process has already terminated
+                        continue
+                    }
+
+                    # STALE PID CHECK: Verify StartTime matches recorded StartTime
+                    $currentStartTime = $proc.StartTime.ToString("o")
+                    if ($entry.startTime -and ($currentStartTime -ne $entry.startTime)) {
+                        Write-Host ('[WARN] Stale PID detected: PID ' + $pidNum + ' was reused by another process (started at ' + $currentStartTime + ' vs recorded ' + $entry.startTime + '). Skipping to protect unrelated application.') -ForegroundColor Yellow
+                        continue
+                    }
+
+                    # Verify process identity
+                    if (-not (Test-IsGroundUpGPTProcess $pidNum) -and ($proc.ProcessName -notmatch '^(cmd|python|node)$')) {
+                        Write-Host ('[WARN] Process ' + $proc.ProcessName + ' (PID ' + $pidNum + ') does not match GroundUpGPT identity. Skipping.') -ForegroundColor Yellow
+                        continue
+                    }
+
+                    $role = if ($entry.role) { $entry.role } else { $proc.ProcessName }
+                    Write-Host ('[*] Stopping GroundUpGPT ' + $role + ' (PID ' + $pidNum + ')...') -ForegroundColor Cyan
+                    Stop-Process -Id $pidNum -Force -ErrorAction SilentlyContinue
+                    $stoppedCount++
+                }
+            }
         }
+    } catch {
+        Write-Host ('[WARN] Error parsing tracked process file: ' + $_.Exception.Message) -ForegroundColor Yellow
     }
 }
 
-# 2. Check active listeners on ports 8000 and 3000
-try {
-    $connections = Get-NetTCPConnection -LocalPort 8000, 3000 -State Listen -ErrorAction SilentlyContinue
-    if ($connections) {
-        foreach ($conn in $connections) {
-            if ($conn.OwningProcess -gt 0) {
-                $pidsToKill += $conn.OwningProcess
+# 2. Check listeners on ports 8000 and 3000 to catch any remaining GroundUpGPT processes,
+# while explicitly protecting and never terminating unrelated applications.
+$ports = @(8000, 3000)
+foreach ($port in $ports) {
+    try {
+        $conns = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
+        if ($conns) {
+            foreach ($conn in $conns) {
+                $pidNum = $conn.OwningProcess
+                if ($pidNum -le 4) { continue }
+
+                $proc = Get-Process -Id $pidNum -ErrorAction SilentlyContinue
+                if (-not $proc) { continue }
+
+                if (Test-IsGroundUpGPTProcess $pidNum) {
+                    Write-Host ('[*] Stopping GroundUpGPT listener on port ' + $port + ' (PID ' + $pidNum + ', ' + $proc.ProcessName + ')...') -ForegroundColor Cyan
+                    Stop-Process -Id $pidNum -Force -ErrorAction SilentlyContinue
+                    $stoppedCount++
+                } else {
+                    Write-Host ('[INFO] Preserving unrelated application on port ' + $port + ' (PID ' + $pidNum + ', ' + $proc.ProcessName + ').') -ForegroundColor Gray
+                }
             }
         }
-    }
-} catch {}
-
-$uniquePids = $pidsToKill | Select-Object -Unique
-
-if (-not $uniquePids -or $uniquePids.Count -eq 0) {
-    Write-Host '[INFO] No running GroundUpGPT processes found on ports 8000 or 3000.' -ForegroundColor Yellow
-} else {
-    foreach ($pidNum in $uniquePids) {
-        try {
-            $proc = Get-Process -Id $pidNum -ErrorAction Stop
-            $procName = $proc.ProcessName.ToLower()
-
-            # Safety check: only stop if process is python, node, cmd, or uvicorn
-            if ($procName -match 'python|node|cmd|uvicorn') {
-                Write-Host ('Stopping GroundUpGPT ' + $proc.ProcessName + ' (PID ' + $pidNum + ')...') -ForegroundColor Cyan
-                Stop-Process -Id $pidNum -Force -ErrorAction SilentlyContinue
-            } else {
-                Write-Host ('Skipping unrelated process ' + $proc.ProcessName + ' (PID ' + $pidNum + ')') -ForegroundColor Yellow
-            }
-        } catch {
-            # Process may have already exited
-        }
-    }
-    Write-Host '[SUCCESS] GroundUpGPT services stopped successfully.' -ForegroundColor Green
+    } catch {}
 }
 
-# Clean up PID file
+# 3. Clean up PID file
 if (Test-Path $pidFile) {
     Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+}
+
+Write-Host ''
+if ($stoppedCount -gt 0) {
+    Write-Host ('[SUCCESS] GroundUpGPT services stopped successfully (' + $stoppedCount + ' process(es) terminated).') -ForegroundColor Green
+} else {
+    Write-Host '[INFO] No running GroundUpGPT processes found.' -ForegroundColor Yellow
 }
 
 Write-Host ''
