@@ -579,6 +579,7 @@ class SFTDataPipeline:
         batch_size: int = 32,
         device: Union[str, torch.device] = "cpu",
         pad_to_max_len: bool = True,
+        generator: Optional[torch.Generator] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Sample a mini-batch with assistant-only loss masking.
 
@@ -599,7 +600,9 @@ class SFTDataPipeline:
             raise ValueError(f"Split {split!r} contains 0 examples.")
 
         # Random sampling with replacement if batch_size > len(dataset)
-        indices = torch.randint(len(dataset), (batch_size,)).tolist()
+        indices = torch.randint(
+            len(dataset), (batch_size,), generator=generator
+        ).tolist()
         batch_items = [dataset[i] for i in indices]
 
         collated = collate_sft_batch(
