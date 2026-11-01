@@ -21,6 +21,16 @@ from src.generation import (
     sample_next_token,
     decode_token_sequence,
 )
+from src.sft_data import (
+    ConversationTurn,
+    ConversationExample,
+    TokenizedExample,
+    SFTDataset,
+    SFTDataPipeline,
+    encode_conversation,
+    format_conversation,
+    collate_sft_batch,
+)
 
 __version__ = "0.1.0"
 __all__ = [
@@ -43,4 +53,12 @@ __all__ = [
     "TextGenerator",
     "sample_next_token",
     "decode_token_sequence",
+    "ConversationTurn",
+    "ConversationExample",
+    "TokenizedExample",
+    "SFTDataset",
+    "SFTDataPipeline",
+    "encode_conversation",
+    "format_conversation",
+    "collate_sft_batch",
 ]

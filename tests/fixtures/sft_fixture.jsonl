@@ -1,0 +1,8 @@
+{"instruction": "What is the capital of France?", "context": "", "response": "The capital of France is Paris.", "category": "open_qa"}
+{"instruction": "Identify which of the following is a fruit: carrot, apple, potato", "context": "", "response": "Apple is a fruit.", "category": "classification"}
+{"instruction": "Summarize the key benefit of unit testing.", "context": "Unit testing verifies that individual components function correctly in isolation, allowing developers to catch bugs early and refactor code with confidence.", "response": "Unit testing verifies components in isolation to catch bugs early and enable confident refactoring.", "category": "summarization"}
+{"instruction": "List three primary colors.", "context": "", "response": "The three primary colors of light are red, green, and blue.", "category": "brainstorming"}
+{"instruction": "When was Python first released?", "context": "Python was conceived in the late 1980s by Guido van Rossum and first released in 1991.", "response": "Python was first released in 1991 by Guido van Rossum.", "category": "information_extraction"}
+{"instruction": "Write a haiku about autumn.", "context": "", "response": "Golden leaves float down,\nCrisp air whispers through the trees,\nWinter comes so soon.", "category": "creative_writing"}
+{"instruction": "Is 17 a prime number?", "context": "", "response": "Yes, 17 is a prime number because it is divisible only by 1 and itself.", "category": "general_qa"}
+{"instruction": "Extract the founding year of the company from the text.", "context": "Acme Corp was established in 1984 as a specialty manufacturing firm.", "response": "Acme Corp was established in 1984.", "category": "closed_qa"}
