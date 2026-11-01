@@ -9,6 +9,7 @@ interface ChatInputProps {
   onStop: () => void;
   isGenerating: boolean;
   disabled: boolean;
+  isSft?: boolean;
 }
 
 export function ChatInput({
@@ -18,6 +19,7 @@ export function ChatInput({
   onStop,
   isGenerating,
   disabled,
+  isSft,
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -59,6 +61,8 @@ export function ChatInput({
               ? "Connecting to GroundUpGPT backend..."
               : isGenerating
               ? "Model is generating tokens..."
+              : isSft
+              ? "Ask GroundUpGPT anything (experimental instruction-tuned model)..."
               : "Type a prompt to complete... (e.g., 'The ')"
           }
           disabled={disabled || isGenerating}

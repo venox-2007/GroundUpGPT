@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-CUDA%20Accelerated-EE4C2C.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Completed (Steps 1-17)](https://img.shields.io/badge/Status-Completed%20(Steps%201--17)-brightgreen.svg)]()
+[![Status: Completed (Steps 1-28)](https://img.shields.io/badge/Status-Completed%20(Steps%201--28)-brightgreen.svg)]()
 
 GroundUpGPT is an educational and engineering project dedicated to designing, implementing, training, evaluating, and deploying a small autoregressive, decoder-only Transformer language model completely from scratch using Python and PyTorch.
 
@@ -703,6 +703,32 @@ python scripts/train_sft_5m.py --max-steps 650 --max-seconds 580 --output-dir ch
 
 ---
 
+## Web UI Instruction-Tuned Model Integration (Step 28)
+
+In Step 28, the fine-tuned 5,051,904-parameter SFT model is seamlessly integrated into the browser application:
+
+1. **Backward-Compatible SFT Checkpoint Loading**:
+   - `backend/model_loader.py` dynamically normalizes tokenizer types (`"bpe"`, `"BPETokenizer"`).
+   - Extracts structured SFT telemetry: `is_sft=True`, `model_mode="chat"`, `sft_step=650`, `global_step=3650`, `source_step=3000`, `sft_val_loss=3.8380`, `sft_val_perplexity=46.43`, and `lm_val_loss=5.2730`.
+2. **Canonical Profile Discovery**:
+   - Pre-configured profiles `5m_sft_best` and `5m_sft_latest` added to `MODEL_PROFILES`.
+   - `resolve_default_profile()` prioritizes `5m_sft_best` as the default experience on startup.
+3. **Conversational Prompt Formatting**:
+   - Prompts sent to SFT models are wrapped in `<|user|>\n{prompt}\n<|assistant|>\n` turns.
+   - Pretrained language model profiles (`5m_phase2_best`, `5m_best`, `demo`) retain raw prompt completion behavior without turn delimiters.
+4. **Zero-Leakage Delimiter Prefix Buffering**:
+   - `src/generation.py` implements a streaming prefix buffer (`find_longest_stop_prefix_len`) that holds back partial delimiter fragments across token boundaries.
+   - Stop sequences (`<|endoftext|>`, `<|user|>`, `<|assistant|>`) are never leaked to the web client.
+5. **Exact Token-Weighted Gradient Accumulation**:
+   - Corrected micro-batch loss normalization in `src/sft_trainer.py` to divide the sum of active target tokens across all micro-batches, ensuring exact gradient equivalence with single-batch training.
+6. **Responsive Web Chat Interface**:
+   - Distinct model mode badges (`Chat (SFT)` vs `Completion`).
+   - SFT telemetry displays (SFT Step, SFT Loss, SFT Perplexity, LM Benchmark).
+   - Dynamic prompt placeholder adapting between conversational chat and next-token completion.
+   - Prominent educational attribution to Databricks Dolly 15k (CC BY-SA 3.0).
+
+---
+
 ## Current Implementation Status
 
 - **Completed Steps**:
@@ -733,4 +759,5 @@ python scripts/train_sft_5m.py --max-steps 650 --max-seconds 580 --output-dir ch
   - **Step 25 — Model Comparison & Web UI Integration**: Executed comparative benchmarking (`scripts/compare_models_step25.py`) across Step 1000 Baseline, Phase 2 Best, and Phase 2 Latest. Extended backend profile discovery to expose all distinct checkpoints (`5m_phase2_best`, `5m_phase2_latest`, `5m_best`, `5m_latest`, `5m_step200`, `demo`) with automatic preference for Phase 2 Best. Updated Next.js UI sidebar to render active step, dual-track validation losses (Orig Val, Exp Val), and perplexity. Verified Windows launcher preflight (19/19 tests), Next.js production build (`npm run build`), and full repository test suite (131/131 passing).
   - **Step 26 — Supervised Conversation Dataset & Training Pipeline**: Sourced human-generated Databricks Dolly 15k dataset (CC BY-SA 3.0), implemented `<|user|>\n`, `<|assistant|>\n`, `<|endoftext|>\n` delimiters with 100% BPE lossless roundtrip, assistant-only loss masking with `-100`, regex PII scrubbing, exact and near deduplication, zero-leak train/val splitting, and cached 9,373 examples (8,435 train, 938 validation, 1,180,136 total tokens, 63.14% active response tokens) in `data/cache_sft/`. Verified with 13/13 focused unit tests (`tests/test_sft_data.py`).
   - **Step 27 — First Supervised Instruction Fine-Tuning Run**: Executed bounded SFT run on RTX 3050 Laptop GPU from Step 3000 base checkpoint through 650 optimizer steps (1.62 min wall time, well under 10-min budget). Token-weighted assistant-only SFT validation loss dropped from 6.5486 to **3.8380** (perplexity dropped from 698.30 to **46.43**). Monitored frozen LM benchmark for catastrophic forgetting (loss 4.5685 -> 5.2730 / PPL 96.40 -> 195.00). Verified stop-sequence termination at `<|endoftext|>`, evaluated 6 unseen conversational benchmark prompts, and saved protected checkpoints (`checkpoints/5m_sft/`). Verified with 8/8 unit tests (`tests/test_sft_training.py`).
-- **Roadmap Complete**: Phase 7 (Steps 26 & 27) successfully completed! All 27 steps complete.
+  - **Step 28 — Instruction-Tuned Web Chat Integration**: Integrated SFT checkpoint loading (`bpe` and `BPETokenizer` compatibility), dynamic default profile preference (`5m_sft_best`), conversational prompt formatting, streaming delimiter prefix buffering (`find_longest_stop_prefix_len`), exact token-weighted gradient accumulation, and responsive Next.js chat interface with mode badges, telemetry, dynamic placeholder, and Dolly 15k attribution. Verified with 9/9 focused integration tests (`tests/test_sft_ui_integration.py`), `npm run build`, and full test suite (161/161 passing).
+- **Roadmap Complete**: Phase 7 (Steps 26, 27, and 28) successfully completed! All 28 steps complete.

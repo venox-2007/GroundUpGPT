@@ -271,8 +271,14 @@ export default function ChatPage() {
               <span className="text-sm font-semibold text-slate-200">
                 GroundUpGPT
               </span>
-              <span className="rounded bg-teal-950 px-2 py-0.5 text-[10px] font-mono font-medium text-teal-400 border border-teal-800">
-                {modelInfo?.checkpoint_step !== undefined && modelInfo.checkpoint_step !== null
+              <span className={`rounded px-2 py-0.5 text-[10px] font-mono font-medium border ${
+                modelInfo?.is_sft
+                  ? "bg-amber-950 text-amber-300 border-amber-800"
+                  : "bg-teal-950 text-teal-400 border-teal-800"
+              }`}>
+                {modelInfo?.is_sft
+                  ? `SFT #${modelInfo.sft_step ?? modelInfo.checkpoint_step} (Chat) • Active`
+                  : modelInfo?.checkpoint_step !== undefined && modelInfo.checkpoint_step !== null
                   ? `Step ${modelInfo.checkpoint_step} • Active`
                   : "Active"}
               </span>
@@ -295,30 +301,40 @@ export default function ChatPage() {
           <div className="mx-auto flex max-w-3xl flex-col">
             {messages.length === 0 ? (
               <div className="my-auto flex flex-col items-center justify-center py-16 text-center">
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-teal-900/40 border border-teal-700/60 font-mono text-lg font-bold text-teal-300">
+                <div className={`flex h-12 w-12 items-center justify-center rounded-xl border font-mono text-lg font-bold ${
+                  modelInfo?.is_sft
+                    ? "bg-amber-900/40 border-amber-700/60 text-amber-300"
+                    : "bg-teal-900/40 border-teal-700/60 text-teal-300"
+                }`}>
                   G
                 </div>
                 <h2 className="mt-4 text-lg font-semibold text-slate-100">
-                  GroundUpGPT Web Completion
+                  {modelInfo?.is_sft ? "GroundUpGPT Assistant (Experimental)" : "GroundUpGPT Web Completion"}
                 </h2>
                 <p className="mt-1.5 max-w-md text-xs leading-relaxed text-slate-400">
-                  First-principles Transformer language model trained from scratch.
-                  Enter a starting prefix to observe next-token autoregressive completions.
+                  {modelInfo?.is_sft
+                    ? "5.05M-parameter Transformer fine-tuned on Dolly 15k instruction pairs. Ask a question or command."
+                    : "First-principles Transformer language model trained from scratch. Enter a starting prefix to observe next-token autoregressive completions."}
                 </p>
 
                 {/* Prompt Suggestions */}
                 <div className="mt-8 flex flex-wrap justify-center gap-2">
-                  {["The ", "Once upon ", "In the ancient ", "GroundUpGPT "].map(
-                    (promptSample) => (
-                      <button
-                        key={promptSample}
-                        onClick={() => executeGeneration(promptSample)}
-                        className="rounded-full border border-slate-800 bg-slate-900 px-3.5 py-1.5 text-xs text-slate-300 transition hover:border-teal-600 hover:text-teal-300"
-                      >
-                        {promptSample} →
-                      </button>
-                    )
-                  )}
+                  {(modelInfo?.is_sft
+                    ? ["What is Python?", "Explain gravity in simple terms", "Write a short poem about coding", "What are the primary colors?"]
+                    : ["The ", "Once upon ", "In the ancient ", "GroundUpGPT "]
+                  ).map((promptSample) => (
+                    <button
+                      key={promptSample}
+                      onClick={() => executeGeneration(promptSample)}
+                      className={`rounded-full border border-slate-800 bg-slate-900 px-3.5 py-1.5 text-xs text-slate-300 transition ${
+                        modelInfo?.is_sft
+                          ? "hover:border-amber-600 hover:text-amber-300"
+                          : "hover:border-teal-600 hover:text-teal-300"
+                      }`}
+                    >
+                      {promptSample} →
+                    </button>
+                  ))}
                 </div>
               </div>
             ) : (
@@ -346,6 +362,7 @@ export default function ChatPage() {
           onStop={handleStop}
           isGenerating={isGenerating}
           disabled={!health?.model_loaded}
+          isSft={modelInfo?.is_sft}
         />
       </main>
     </div>

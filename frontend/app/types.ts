@@ -40,6 +40,15 @@ export interface ModelInfo {
   original_val_loss?: number | null;
   expanded_val_loss?: number | null;
   checkpoint_perplexity?: number | null;
+  global_step?: number | null;
+  sft_step?: number | null;
+  source_step?: number | null;
+  is_sft?: boolean;
+  model_mode?: string;
+  sft_val_loss?: number | null;
+  sft_val_perplexity?: number | null;
+  lm_val_loss?: number | null;
+  lm_val_perplexity?: number | null;
 }
 
 export interface ModelProfileEntry {
@@ -48,6 +57,7 @@ export interface ModelProfileEntry {
   tokenizer_path: string;
   checkpoint_exists: boolean;
   tokenizer_exists: boolean;
+  is_sft?: boolean;
 }
 
 export interface ModelProfilesResponse {

@@ -432,32 +432,36 @@ class SFTTrainer:
             self.optimizer.zero_grad(set_to_none=True)
             accum_loss = 0.0
 
-            # Gradient accumulation over micro-batches
-            for micro_step in range(self.config.grad_accum_steps):
-                x, y, mask = self.pipeline.get_batch(
+            # Exact token-weighted gradient accumulation over micro-batches
+            micro_batches = [
+                self.pipeline.get_batch(
                     split="train",
                     batch_size=self.config.micro_batch_size,
                     device=self.device,
                     pad_to_max_len=True,
                 )
+                for _ in range(self.config.grad_accum_steps)
+            ]
+            total_step_active = sum(int(m.sum().item()) for _, _, m in micro_batches)
+            denom = max(1, total_step_active)
 
+            for x, y, mask in micro_batches:
                 with torch.amp.autocast(
                     device_type="cuda",
                     dtype=torch.float16,
                     enabled=(self.device.type == "cuda"),
                 ):
                     logits, _ = self.model(x)
-                    loss = F.cross_entropy(
+                    loss_sum = F.cross_entropy(
                         logits.view(-1, logits.size(-1)),
                         y.view(-1),
                         ignore_index=IGNORE_INDEX,
-                        reduction="mean",
+                        reduction="sum",
                     )
-                    # Scale for accumulation
-                    loss_scaled = loss / self.config.grad_accum_steps
+                    loss_scaled = loss_sum / denom
 
                 self.scaler.scale(loss_scaled).backward()
-                accum_loss += loss.item() / self.config.grad_accum_steps
+                accum_loss += loss_sum.item() / denom
                 self.total_tokens_processed += int(mask.sum().item())
 
             # Gradient clipping & optimizer step

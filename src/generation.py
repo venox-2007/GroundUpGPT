@@ -105,6 +105,22 @@ class GenerationResult:
     context_cropped: bool = False
 
 
+def find_longest_stop_prefix_len(text: str, stop_sequences: Sequence[str]) -> int:
+    """Find the length of the longest suffix of text that is a prefix of any stop sequence.
+
+    Used by streaming generators to prevent leaking partial delimiter tokens across chunk boundaries.
+    """
+    if not text or not stop_sequences:
+        return 0
+    max_k = min(len(text), max(len(s) for s in stop_sequences) - 1)
+    for k in range(max_k, 0, -1):
+        suffix = text[-k:]
+        for s in stop_sequences:
+            if s.startswith(suffix):
+                return k
+    return 0
+
+
 def sample_next_token(
     logits: torch.Tensor,
     temperature: float = 1.0,
@@ -310,7 +326,7 @@ class TextGenerator:
 
         curr_tokens = list(prompt_ids)
         idx = torch.tensor(curr_tokens, dtype=torch.long, device=self.device).unsqueeze(0)
-        accumulated_text = ""
+        pending_buffer = ""
 
         with torch.inference_mode():
             for step in range(cfg.max_new_tokens):
@@ -343,21 +359,48 @@ class TextGenerator:
                 if is_last_step:
                     text_chunk += stream_decoder.finalize()
 
-                accumulated_text += text_chunk
+                pending_buffer += text_chunk
 
-                # 6. Check Stop Sequences
+                # 6. Check Stop Sequences & Prefix Buffering
                 stopped = False
+                emit_chunk = ""
+
                 if cfg.stop_sequences:
+                    # 6a. Check for full stop sequence match
+                    earliest_idx = None
                     for stop_seq in cfg.stop_sequences:
-                        if stop_seq in accumulated_text:
-                            stopped = True
-                            break
+                        idx_match = pending_buffer.find(stop_seq)
+                        if idx_match != -1:
+                            if earliest_idx is None or idx_match < earliest_idx:
+                                earliest_idx = idx_match
+
+                    if earliest_idx is not None:
+                        stopped = True
+                        emit_chunk = pending_buffer[:earliest_idx]
+                        pending_buffer = ""
+                    else:
+                        # 6b. Check for partial prefix match at end of buffer
+                        k = find_longest_stop_prefix_len(pending_buffer, cfg.stop_sequences)
+                        if k > 0:
+                            emit_chunk = pending_buffer[:-k]
+                            pending_buffer = pending_buffer[-k:]
+                        else:
+                            emit_chunk = pending_buffer
+                            pending_buffer = ""
+
+                        # If this is the last step without a stop sequence, flush remaining buffer
+                        if is_last_step:
+                            emit_chunk += pending_buffer
+                            pending_buffer = ""
+                else:
+                    emit_chunk = pending_buffer
+                    pending_buffer = ""
 
                 is_finished = is_last_step or stopped
 
                 yield StreamChunk(
                     token_id=next_token_id,
-                    text_chunk=text_chunk,
+                    text_chunk=emit_chunk,
                     step=step,
                     is_finished=is_finished,
                 )
@@ -497,5 +540,7 @@ def generate_sft_response(
             cleaned_text = cleaned_text[: -len(delim)].strip()
 
     result.generated_text = cleaned_text
+    result.prompt = prompt
+    result.full_text = prompt + cleaned_text
     return result
 

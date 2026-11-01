@@ -123,6 +123,7 @@ async def get_model_profiles() -> dict:
             "tokenizer_path": v["tokenizer_path"],
             "checkpoint_exists": True,
             "tokenizer_exists": True,
+            "is_sft": bool(v.get("is_sft", False)),
         }
     return {
         "active_model": model_manager.model_info.profile_name if (model_manager.model_info and model_manager.model_info.profile_name) else (model_manager.model_info.model_name if model_manager.model_info else None),
@@ -186,6 +187,8 @@ async def generate_text(request: GenerateRequest, raw_request: Request) -> Gener
             detail="Model is not loaded. Run 'python scripts/generate_demo.py' to generate artifacts.",
         )
 
+    is_sft = bool(model_manager.model_info and getattr(model_manager.model_info, "is_sft", False))
+
     config = GenerationConfig(
         max_new_tokens=request.max_new_tokens,
         temperature=request.temperature,
@@ -200,7 +203,11 @@ async def generate_text(request: GenerateRequest, raw_request: Request) -> Gener
     def run_generate() -> None:
         try:
             assert model_manager.generator is not None
-            res = model_manager.generator.generate(prompt=request.prompt, config=config)
+            if is_sft:
+                from src.generation import generate_sft_response
+                res = generate_sft_response(model_manager.generator, prompt=request.prompt, config=config)
+            else:
+                res = model_manager.generator.generate(prompt=request.prompt, config=config)
             worker_result["result"] = res
         except Exception as exc:
             worker_error.append(exc)
@@ -262,18 +269,29 @@ async def generate_text_stream(
             detail="Model is not loaded. Run 'python scripts/generate_demo.py' to generate artifacts.",
         )
 
+    is_sft = bool(model_manager.model_info and getattr(model_manager.model_info, "is_sft", False))
+
+    if is_sft:
+        from src.generation import format_sft_prompt
+        prompt_to_run = format_sft_prompt(request.prompt)
+        stop_seqs = ["<|endoftext|>", "<|user|>", "<|assistant|>"]
+    else:
+        prompt_to_run = request.prompt
+        stop_seqs = None
+
     config = GenerationConfig(
         max_new_tokens=request.max_new_tokens,
         temperature=request.temperature,
         top_k=request.top_k,
         top_p=request.top_p,
         seed=request.seed,
+        stop_sequences=stop_seqs,
     )
 
     async def sse_event_stream() -> AsyncIterator[str]:
         prompt_tokens_count = 0
         try:
-            prompt_ids = model_manager.generator.tokenizer.encode(request.prompt)
+            prompt_ids = model_manager.generator.tokenizer.encode(prompt_to_run)
             prompt_tokens_count = len(prompt_ids)
         except Exception as encode_err:
             error_payload = json.dumps({"error": f"Failed to encode prompt: {encode_err}"})
@@ -291,7 +309,7 @@ async def generate_text_stream(
             try:
                 assert model_manager.generator is not None
                 for chunk in model_manager.generator.generate_stream(
-                    prompt=request.prompt, config=config
+                    prompt=prompt_to_run, config=config
                 ):
                     if cancel_event.is_set():
                         break
@@ -411,16 +429,6 @@ async def generate_text_stream(
             logger.error(f"Streaming inference error: {exc}", exc_info=True)
             error_payload = json.dumps({"error": f"Streaming inference error: {str(exc)}"})
             yield f"event: error\ndata: {error_payload}\n\n"
-
-    return StreamingResponse(
-        sse_event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
 
     return StreamingResponse(
         sse_event_stream(),

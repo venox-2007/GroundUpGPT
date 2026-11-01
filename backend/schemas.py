@@ -84,6 +84,15 @@ class ModelInfoResponse(BaseModel):
     original_val_loss: Optional[float] = None
     expanded_val_loss: Optional[float] = None
     checkpoint_perplexity: Optional[float] = None
+    global_step: Optional[int] = None
+    sft_step: Optional[int] = None
+    source_step: Optional[int] = None
+    is_sft: bool = False
+    model_mode: str = "completion"
+    sft_val_loss: Optional[float] = None
+    sft_val_perplexity: Optional[float] = None
+    lm_val_loss: Optional[float] = None
+    lm_val_perplexity: Optional[float] = None
 
 
 class HealthResponse(BaseModel):

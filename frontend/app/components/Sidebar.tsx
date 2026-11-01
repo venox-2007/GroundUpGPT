@@ -45,14 +45,26 @@ export function Sidebar({
       return false;
     }
     // Non-overlapping fallback only if active identity is absent:
+    if (key === "5m_sft_best") {
+      return modelInfo.is_sft === true && (!modelInfo.profile_name || !modelInfo.profile_name.toLowerCase().includes("latest"));
+    }
+    if (key === "5m_sft_latest") {
+      return modelInfo.is_sft === true && !!modelInfo.profile_name && modelInfo.profile_name.toLowerCase().includes("latest");
+    }
     if (key === "5m_best") {
-      return modelInfo.checkpoint_step === 1000 && (!modelInfo.profile_name || !modelInfo.profile_name.toLowerCase().includes("latest"));
+      return !modelInfo.is_sft && modelInfo.checkpoint_step === 1000 && (!modelInfo.profile_name || !modelInfo.profile_name.toLowerCase().includes("latest"));
     }
     if (key === "5m_latest") {
-      return modelInfo.checkpoint_step === 1000 && !!modelInfo.profile_name && modelInfo.profile_name.toLowerCase().includes("latest");
+      return !modelInfo.is_sft && modelInfo.checkpoint_step === 1000 && !!modelInfo.profile_name && modelInfo.profile_name.toLowerCase().includes("latest");
+    }
+    if (key === "5m_phase2_best") {
+      return !modelInfo.is_sft && modelInfo.checkpoint_step === 3000 && (!modelInfo.profile_name || !modelInfo.profile_name.toLowerCase().includes("latest"));
+    }
+    if (key === "5m_phase2_latest") {
+      return !modelInfo.is_sft && modelInfo.checkpoint_step === 3000 && !!modelInfo.profile_name && modelInfo.profile_name.toLowerCase().includes("latest");
     }
     if (key === "5m_step200") {
-      return modelInfo.checkpoint_step === 200;
+      return !modelInfo.is_sft && modelInfo.checkpoint_step === 200;
     }
     if (key === "demo") {
       return modelInfo.vocab_size < 4096;
@@ -61,6 +73,8 @@ export function Sidebar({
   };
 
   const getProfileButtonLabel = (key: string, name: string): string => {
+    if (key === "5m_sft_best") return "SFT Best (Chat)";
+    if (key === "5m_sft_latest") return "SFT Latest";
     if (key === "5m_phase2_best") return "Phase 2 Best";
     if (key === "5m_phase2_latest") return "Phase 2 (3K)";
     if (key === "5m_best") return "Step 1000";
@@ -202,6 +216,12 @@ export function Sidebar({
               </div>
               <div className="space-y-1.5 font-mono text-[11px]">
                 <div className="flex justify-between">
+                  <span className="text-slate-500">Mode:</span>
+                  <span className={`font-semibold ${modelInfo.is_sft ? "text-amber-400" : "text-teal-400"}`}>
+                    {modelInfo.is_sft ? "Chat (Instruction-Tuned)" : "Completion (Pretrained LM)"}
+                  </span>
+                </div>
+                <div className="flex justify-between">
                   <span className="text-slate-500">Parameters:</span>
                   <span className="text-slate-200">
                     {modelInfo.total_parameters.toLocaleString()}
@@ -225,45 +245,84 @@ export function Sidebar({
                     {modelInfo.tokenizer_type} ({modelInfo.tokenizer_vocab_size})
                   </span>
                 </div>
-                {modelInfo.checkpoint_step !== undefined && modelInfo.checkpoint_step !== null && (
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Step:</span>
-                    <span className="text-slate-200">
-                      #{modelInfo.checkpoint_step}
-                    </span>
-                  </div>
-                )}
-                {modelInfo.original_val_loss !== undefined && modelInfo.original_val_loss !== null && (
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Orig Val:</span>
-                    <span className="text-teal-400">
-                      {modelInfo.original_val_loss.toFixed(4)}
-                    </span>
-                  </div>
-                )}
-                {modelInfo.expanded_val_loss !== undefined && modelInfo.expanded_val_loss !== null && (
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Exp Val:</span>
-                    <span className="text-teal-400">
-                      {modelInfo.expanded_val_loss.toFixed(4)}
-                    </span>
-                  </div>
-                )}
-                {modelInfo.checkpoint_perplexity !== undefined && modelInfo.checkpoint_perplexity !== null && (
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Perplexity:</span>
-                    <span className="text-teal-400">
-                      {modelInfo.checkpoint_perplexity.toFixed(1)}
-                    </span>
-                  </div>
-                )}
-                {modelInfo.checkpoint_val_loss !== undefined && modelInfo.checkpoint_val_loss !== null && modelInfo.original_val_loss === undefined && (
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Val Loss:</span>
-                    <span className="text-teal-400">
-                      {modelInfo.checkpoint_val_loss.toFixed(4)}
-                    </span>
-                  </div>
+                {modelInfo.is_sft ? (
+                  <>
+                    {modelInfo.sft_step !== undefined && modelInfo.sft_step !== null && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">SFT Step:</span>
+                        <span className="text-amber-300">
+                          #{modelInfo.sft_step} (Global #{modelInfo.global_step ?? modelInfo.checkpoint_step})
+                        </span>
+                      </div>
+                    )}
+                    {modelInfo.sft_val_loss !== undefined && modelInfo.sft_val_loss !== null && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">SFT Loss:</span>
+                        <span className="text-teal-400">
+                          {modelInfo.sft_val_loss.toFixed(4)}
+                        </span>
+                      </div>
+                    )}
+                    {modelInfo.sft_val_perplexity !== undefined && modelInfo.sft_val_perplexity !== null && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">SFT Perplexity:</span>
+                        <span className="text-teal-400">
+                          {modelInfo.sft_val_perplexity.toFixed(1)}
+                        </span>
+                      </div>
+                    )}
+                    {modelInfo.lm_val_loss !== undefined && modelInfo.lm_val_loss !== null && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">LM Benchmark:</span>
+                        <span className="text-slate-300">
+                          {modelInfo.lm_val_loss.toFixed(4)} (PPL {modelInfo.lm_val_perplexity?.toFixed(1)})
+                        </span>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {modelInfo.checkpoint_step !== undefined && modelInfo.checkpoint_step !== null && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Step:</span>
+                        <span className="text-slate-200">
+                          #{modelInfo.checkpoint_step}
+                        </span>
+                      </div>
+                    )}
+                    {modelInfo.original_val_loss !== undefined && modelInfo.original_val_loss !== null && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Orig Val:</span>
+                        <span className="text-teal-400">
+                          {modelInfo.original_val_loss.toFixed(4)}
+                        </span>
+                      </div>
+                    )}
+                    {modelInfo.expanded_val_loss !== undefined && modelInfo.expanded_val_loss !== null && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Exp Val:</span>
+                        <span className="text-teal-400">
+                          {modelInfo.expanded_val_loss.toFixed(4)}
+                        </span>
+                      </div>
+                    )}
+                    {modelInfo.checkpoint_perplexity !== undefined && modelInfo.checkpoint_perplexity !== null && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Perplexity:</span>
+                        <span className="text-teal-400">
+                          {modelInfo.checkpoint_perplexity.toFixed(1)}
+                        </span>
+                      </div>
+                    )}
+                    {modelInfo.checkpoint_val_loss !== undefined && modelInfo.checkpoint_val_loss !== null && modelInfo.original_val_loss === undefined && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Val Loss:</span>
+                        <span className="text-teal-400">
+                          {modelInfo.checkpoint_val_loss.toFixed(4)}
+                        </span>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -408,10 +467,20 @@ export function Sidebar({
 
           {/* Educational Disclaimer */}
           <div className="rounded-lg border border-slate-800/80 bg-slate-950/30 p-2.5 text-[11px] leading-relaxed text-slate-400">
-            <span className="font-medium text-slate-300">Experimental Model:</span>{" "}
-            This interface runs a small educational Transformer trained on an
-            offline text fixture. It predicts autoregressive next-token completions
-            from prompts; it is not instruction-tuned or conversational.
+            {modelInfo?.is_sft ? (
+              <>
+                <span className="font-medium text-amber-300">Instruction-Tuned Model:</span>{" "}
+                Fine-tuned on Databricks Dolly 15k (CC BY-SA 3.0). Formatted into
+                user-assistant turns with stop delimiters. Responses may be simple or
+                repetitive given the 5.05M educational parameter scale.
+              </>
+            ) : (
+              <>
+                <span className="font-medium text-slate-300">Pretrained LM:</span>{" "}
+                Trained on literary English text without instruction tuning. Predicts raw
+                next-token continuations from prompts.
+              </>
+            )}
           </div>
         </div>
 

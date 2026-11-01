@@ -110,9 +110,9 @@ class ModelManager:
         # 5. Tokenizer Restoration & Validation
         logger.info(f"Loading tokenizer from '{tok_path}'...")
         saved_tok_type = checkpoint.get("tokenizer_type", "BPETokenizer")
-        if saved_tok_type == "BPETokenizer":
+        if saved_tok_type.lower() in ("bpe", "bpetokenizer"):
             tokenizer = BPETokenizer.load(tok_path)
-        elif saved_tok_type == "CharTokenizer":
+        elif saved_tok_type.lower() in ("char", "chartokenizer"):
             raise NotImplementedError("CharTokenizer file loading not supported via JSON path.")
         else:
             raise ValueError(f"Unknown tokenizer type '{saved_tok_type}' in checkpoint.")
@@ -144,14 +144,31 @@ class ModelManager:
         generator = TextGenerator(model, tokenizer, device=target_device)
 
         # 7. Construct Metadata Summary
+        sft_step = checkpoint.get("sft_step")
+        source_step = checkpoint.get("source_step")
+        global_step = checkpoint.get("global_step")
+        if global_step is None and source_step is not None and sft_step is not None:
+            global_step = source_step + sft_step
+        elif global_step is None:
+            global_step = checkpoint.get("step")
+
+        is_sft = sft_step is not None
+        model_mode = "chat" if is_sft else "completion"
+
         display_profile = model_name
         if display_profile is None:
-            if gpt_config.vocab_size == 4096 and gpt_config.num_layers == 5:
+            if is_sft:
+                display_profile = f"GroundUpGPT-5M SFT (Step {sft_step})"
+            elif gpt_config.vocab_size == 4096 and gpt_config.num_layers == 5:
                 display_profile = "GroundUpGPT-5M (5.05M)"
             elif gpt_config.vocab_size <= 512 and gpt_config.num_layers <= 3:
                 display_profile = "GroundUpGPT-Demo (35K)"
             else:
                 display_profile = f"GroundUpGPT ({model.get_num_params():,} params)"
+
+        checkpoint_step = checkpoint.get("step")
+        if checkpoint_step is None and is_sft:
+            checkpoint_step = global_step
 
         model_info = ModelInfoResponse(
             model_name="GroundUpGPT",
@@ -168,11 +185,20 @@ class ModelManager:
             tokenizer_vocab_size=tokenizer.vocab_size,
             tokenizer_fingerprint=curr_fp,
             device=target_device,
-            checkpoint_step=checkpoint.get("step"),
-            checkpoint_val_loss=checkpoint.get("val_loss"),
+            checkpoint_step=checkpoint_step,
+            checkpoint_val_loss=checkpoint.get("val_loss") or checkpoint.get("sft_val_loss"),
             original_val_loss=checkpoint.get("original_val_loss"),
             expanded_val_loss=checkpoint.get("expanded_val_loss"),
-            checkpoint_perplexity=checkpoint.get("perplexity") or checkpoint.get("expanded_perplexity"),
+            checkpoint_perplexity=checkpoint.get("perplexity") or checkpoint.get("expanded_perplexity") or checkpoint.get("sft_val_perplexity"),
+            global_step=global_step,
+            sft_step=sft_step,
+            source_step=source_step,
+            is_sft=is_sft,
+            model_mode=model_mode,
+            sft_val_loss=checkpoint.get("sft_val_loss"),
+            sft_val_perplexity=checkpoint.get("sft_val_perplexity"),
+            lm_val_loss=checkpoint.get("lm_benchmark_val_loss"),
+            lm_val_perplexity=checkpoint.get("lm_benchmark_perplexity"),
         )
 
         # 8. Atomically assign loaded components only after all validations pass
