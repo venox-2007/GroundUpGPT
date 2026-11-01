@@ -70,21 +70,28 @@ CORE_CACHE_FILES = [
 ]
 
 INSPECTION_PROMPTS = [
-    # Ordinary English sentence starters
+    # 1. Ordinary English prose
     "The sun rose over the",
     "In the middle of the room,",
-    # Factual / expository starters
-    "Biology is the study of",
-    "The capital of France is",
-    # Narrative starters
+    "She walked down the street and",
+    # 2. Narrative continuation
     "Once upon a time in a small village,",
     "He opened the mysterious door and saw",
-    # Question-like starters
+    "The dark storm clouds gathered as",
+    # 3. Science and geography
+    "The capital of France is",
+    "The Earth revolves around the",
+    "The Atlantic Ocean lies between",
+    # 4. Short factual statements
+    "Water is made of",
+    "A triangle has three",
+    "Oxygen is essential for",
+    # 5. Simple definitions
+    "Biology is the study of",
+    "A library is a place where",
+    # 6. Basic question-like sentences
     "What is the reason why",
     "How do birds fly through the",
-    # Additional simple factual sentence-completion prefixes (Step 33/34)
-    "Water is made of",
-    "The Earth revolves around the",
 ]
 
 
@@ -145,13 +152,13 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Monitored Pretraining and Resumption of GroundUpGPT-27M.")
     parser.add_argument("--cache-dir", type=Path, default=Path("data/cache_27m_v1"), help="Pretraining token cache directory.")
     parser.add_argument("--tokenizer-path", type=Path, default=Path("checkpoints/bpe_vocab4096.json"), help="BPE tokenizer path.")
-    parser.add_argument("--checkpoint-dir", type=Path, default=Path("checkpoints/27m_phase3"), help="Output checkpoint directory.")
-    parser.add_argument("--log-path", type=Path, default=Path("logs/training_27m_phase3.json"), help="Telemetry JSON output path.")
+    parser.add_argument("--checkpoint-dir", type=Path, default=Path("checkpoints/27m_phase4"), help="Output checkpoint directory.")
+    parser.add_argument("--log-path", type=Path, default=Path("logs/training_27m_phase4.json"), help="Telemetry JSON output path.")
     parser.add_argument(
         "--resume-from",
         type=Path,
-        default=Path("checkpoints/27m_phase2/model_27m_latest.pt"),
-        help="Path to checkpoint to resume from (default: checkpoints/27m_phase2/model_27m_latest.pt).",
+        default=Path("checkpoints/27m_phase3/model_27m_latest.pt"),
+        help="Path to checkpoint to resume from (default: checkpoints/27m_phase3/model_27m_latest.pt).",
     )
     parser.add_argument(
         "--fresh",
@@ -159,7 +166,7 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help="Explicitly initialize a new model from scratch. Mutually exclusive with --resume-from.",
     )
-    parser.add_argument("--max-steps", type=int, default=4000, help="Target ending optimizer step (default: 4000).")
+    parser.add_argument("--max-steps", type=int, default=6000, help="Target ending optimizer step (default: 6000).")
     parser.add_argument("--max-time-seconds", type=float, default=900.0, help="Maximum training wall time in seconds (default: 900s = 15m).")
     parser.add_argument("--micro-batch-size", type=int, default=8, help="Sequences per micro-batch (default: 8).")
     parser.add_argument("--grad-accum", type=int, default=4, help="Gradient accumulation steps (effective batch: 32 seqs = 8192 tokens).")
@@ -173,6 +180,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-windows", type=int, default=48, help="Number of fixed windows per evaluation track (default: 48).")
     parser.add_argument("--weight-decay", type=float, default=0.01, help="AdamW weight decay on 2D weights (default: 0.01).")
     parser.add_argument("--grad-clip", type=float, default=1.0, help="Gradient norm clip threshold (default: 1.0).")
+    parser.add_argument("--patience", type=int, default=4, help="Early stopping patience: consecutive evals without improvement (default: 4).")
     parser.add_argument("--seed", type=int, default=1337, help="Random seed for reproducibility.")
     parser.add_argument("--device", type=str, default="auto", help="'auto', 'cuda', or 'cpu'.")
     parser.add_argument("--use-sdpa", action="store_true", default=True, help="Use PyTorch SDPA attention fast-path.")
@@ -560,7 +568,14 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
     print(f"    -> Track C (Wikipedia Val):  Loss: {base_loss_C:.4f} | PPL: {base_ppl_C:.2f}")
 
     if is_resumed:
-        if start_step == 2400:
+        if start_step == 3968:
+            print(f"[*] Baseline Verification vs Step 34 Report:")
+            print(f"    Track A: {base_loss_A:.4f} (Step 34 reported: 3.7095)")
+            print(f"    Track B: {base_loss_B:.4f} (Step 34 reported: 4.6069)")
+            print(f"    Track C: {base_loss_C:.4f} (Step 34 reported: 2.7236)")
+            if abs(base_loss_A - 3.7095) > 0.05:
+                logger.warning(f"Baseline Track A loss ({base_loss_A:.4f}) deviates from expected (3.7095)!")
+        elif start_step == 2400:
             print(f"[*] Baseline Verification vs Step 33 Report:")
             print(f"    Track A: {base_loss_A:.4f} (Step 33 reported: 4.0030)")
             print(f"    Track B: {base_loss_B:.4f} (Step 33 reported: 4.8810)")
@@ -601,6 +616,7 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
     accum_loss = base_loss_A
     skipped_updates = 0
     successful_updates = 0
+    bad_eval_count = 0
 
     while step < args.max_steps:
         # Check wall-clock budget
@@ -700,6 +716,9 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
             if is_best:
                 best_val_loss = val_loss_A
                 best_step = step
+                bad_eval_count = 0
+            else:
+                bad_eval_count += 1
 
             ckpt_payload = {
                 "step": step,
@@ -754,6 +773,22 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
                 "val_metrics": ckpt_payload["val_metrics"],
                 "wall_time_s": round(time.perf_counter() - train_start_time, 2),
             })
+
+            if args.patience > 0 and bad_eval_count >= args.patience:
+                logger.warning(
+                    f"Early stopping triggered: validation loss has not improved for {bad_eval_count} consecutive evaluations "
+                    f"(current Track A: {val_loss_A:.4f}, best: {best_val_loss:.4f} at step {best_step})."
+                )
+                stop_reason = "early_stopping"
+                break
+
+            if val_loss_A > best_val_loss + 0.5:
+                logger.warning(
+                    f"Early stopping triggered: validation loss diverged by >0.5 from best "
+                    f"(current Track A: {val_loss_A:.4f}, best: {best_val_loss:.4f} at step {best_step})."
+                )
+                stop_reason = "val_divergence"
+                break
 
     total_training_wall_time = time.perf_counter() - train_start_time
 

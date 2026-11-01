@@ -390,3 +390,81 @@ def test_resumption_exact_numerical_equivalence(tmp_path: Path):
     for (n1, p1), (n2, p2) in zip(model_cont.named_parameters(), model_resumed2.named_parameters()):
         assert n1 == n2
         assert torch.allclose(p1, p2, atol=1e-6), f"Weights diverged at parameter {n1}"
+
+
+def test_step3968_checkpoint_restoration_and_schedule_continuation():
+    """Verify that Step 3968 checkpoint loads cleanly and learning rate schedule continues toward 6000."""
+    ckpt_path = Path("checkpoints/27m_phase3/model_27m_latest.pt")
+    if not ckpt_path.exists():
+        pytest.skip(f"Checkpoint {ckpt_path} not available on disk")
+
+    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    assert ckpt["step"] == 3968
+    assert "optimizer_state_dict" in ckpt
+    assert "scaler_state_dict" in ckpt
+    assert "rng_states" in ckpt
+
+    cfg = GPTConfig(**ckpt["model_config"])
+    model = GroundUpGPT(cfg)
+    model.load_state_dict(ckpt["model_state_dict"])
+    assert model.get_num_params() == EXPECTED_PARAM_COUNT
+
+    # Validate continuous LR progression for Step 35 (3968 -> 6000)
+    lr_3968 = compute_learning_rate(3968, warmup_steps=100, total_steps=6000, peak_lr=3e-4, min_lr=3e-5)
+    lr_3969 = compute_learning_rate(3969, warmup_steps=100, total_steps=6000, peak_lr=3e-4, min_lr=3e-5)
+    lr_5000 = compute_learning_rate(5000, warmup_steps=100, total_steps=6000, peak_lr=3e-4, min_lr=3e-5)
+    lr_6000 = compute_learning_rate(6000, warmup_steps=100, total_steps=6000, peak_lr=3e-4, min_lr=3e-5)
+
+    assert abs(lr_3968 - 1.01e-4) < 1e-5
+    assert lr_3969 < lr_3968, "LR must smoothly continue downward decay without resetting"
+    assert lr_5000 < lr_3969
+    assert lr_6000 == 3e-5, "LR at step 6000 must reach min_lr"
+
+
+def test_inference_subword_boundary_and_concatenation_correctness():
+    """Audit BPE subword boundary handling and prompt-continuation concatenation.
+
+    Proves that partial beginnings like 'ory' and 'fice' are mathematically expected
+    subword continuations of unspaced prompt tokens (' the' -> 'theory', ' of' -> 'office').
+    """
+    tok_path = Path("checkpoints/bpe_vocab4096.json")
+    if not tok_path.exists():
+        pytest.skip("BPE tokenizer vocab not found")
+
+    tok = BPETokenizer.load(tok_path)
+
+    # 1. Unspaced prompt ending in 'the' (token 310)
+    prompt_unspaced = "The sun rose over the"
+    ids_unspaced = tok.encode(prompt_unspaced)
+    assert ids_unspaced[-1] == 310, f"Expected token 310 (b'the'), got {ids_unspaced[-1]}"
+    assert tok.vocab[310] == b"the"  # Unspaced trailing subword
+
+    # Completion subword IDs for 'ory' -> b'or' (273) + b'y' (121)
+    subword_ids = [273, 121]
+    assert tok.vocab[273] == b"or"
+    assert tok.vocab[121] == b"y"
+
+    # Full joined decoding vs prompt + completion string
+    combined_decoded = tok.decode(ids_unspaced + subword_ids)
+    continuation_decoded = tok.decode(subword_ids)
+    concatenated = prompt_unspaced + continuation_decoded
+
+    assert combined_decoded == "The sun rose over theory"
+    assert concatenated == combined_decoded, "Prompt + completion string must equal full token decode"
+
+    # 2. Spaced prompt ending in ' the ' (token 268)
+    prompt_spaced = "The sun rose over the "
+    ids_spaced = tok.encode(prompt_spaced)
+    # The last token includes the trailing space
+    last_token_bytes = tok.vocab[ids_spaced[-1]]
+    assert last_token_bytes.endswith(b" "), "Spaced prompt must end with a trailing space token"
+
+    # 3. Unspaced 'study of' (token 418) + 'fice' -> 'study office'
+    prompt_of = "Biology is the study of"
+    ids_of = tok.encode(prompt_of)
+    assert ids_of[-1] == 418, f"Expected token 418 (b'of'), got {ids_of[-1]}"
+    assert tok.vocab[418] == b"of"
+    fice_ids = [546, 419]  # b'fi', b'ce'
+    assert tok.decode(ids_of + fice_ids) == "Biology is the study office"
+    assert prompt_of + tok.decode(fice_ids) == "Biology is the study office"
+
