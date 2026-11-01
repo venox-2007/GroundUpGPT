@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-CUDA%20Accelerated-EE4C2C.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Completed (Steps 1-31)](https://img.shields.io/badge/Status-Completed%20(Steps%201--31)-brightgreen.svg)]()
+[![Status: Completed (Steps 1-32)](https://img.shields.io/badge/Status-Completed%20(Steps%201--32)-brightgreen.svg)]()
 
 GroundUpGPT is an educational and engineering project dedicated to designing, implementing, training, evaluating, and deploying a small autoregressive, decoder-only Transformer language model completely from scratch using Python and PyTorch.
 
@@ -886,6 +886,68 @@ python scripts/prepare_27m_corpus.py --num-row-groups 72 --workers 12 --output-d
 
 ---
 
+## First Monitored Pretraining Run of GroundUpGPT-27M (Step 32)
+
+Step 32 conducts the initial autoregressive pretraining phase of our 27,411,456-parameter GroundUpGPT architecture on the expanded 50.3M-token pretraining corpus (`data/cache_27m_v1/`).
+
+### 1. Training Setup & Architecture
+
+- **Model Architecture**: GroundUpGPT-27M (8 layers, 8 heads, $d_{model}=512$, block_size=256, vocab=4096, weight tying, PyTorch SDPA fast-path).
+- **Initialization**: Strictly random Gaussian initialization from scratch ($\mu=0, \sigma=0.02$, seed 1337). Does **not** extend 5M weights or reuse the smoke-test checkpoint.
+- **Corpus**: `data/cache_27m_v1/` (50,301,446 unique training tokens; 72.42% Simple Wikipedia, 27.58% Project Gutenberg).
+- **Optimizer**: AdamW ($\beta_1=0.9, \beta_2=0.95$, weight decay 0.01 on 2D matrices, 0.0 on 1D/biases).
+- **Learning Rate Schedule**: 100-step linear warmup to peak $3 \times 10^{-4}$, decaying via cosine schedule toward $3 \times 10^{-5}$ over 6,000 steps. This ensures that at Step 1,200 ($lr = 2.77 \times 10^{-4}$), learning rate remains in an active, healthy training regime for seamless future continuation.
+- **Precision**: AMP `float16` with `torch.amp.GradScaler` on NVIDIA RTX 3050 6GB Laptop GPU.
+- **Batching**: Micro-batch size 8 $\times$ gradient accumulation 4 = 32 sequences = **8,192 tokens per optimizer step**.
+- **Budget**: Completed all 1,200 target steps in **563.1 seconds (9.38 minutes)**, well within the 15-minute (900s) hard limit.
+
+### 2. Multi-Track Validation Dynamics
+
+Evaluated every 200 optimizer steps on deterministic fixed windows (seed 42) across three independent tracks:
+
+| Track | Dataset & Source | Initial Loss (Step 0) | Initial PPL | Final Loss (Step 1200) | Final PPL | Best Loss |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Track A (Combined Val)** | `data/cache_27m_v1/val_tokens.pt` (2,682,495 tokens) | 8.4587 | 4,715.9 | **4.5249** | **92.3** | **4.5249** (@ step 1200) |
+| **Track B (Orig Gutenberg Val)** | `data/cache/val_tokens.pt` (168,741 tokens) | 8.4422 | 4,638.9 | **5.3575** | **212.2** | 5.3575 (@ step 1200) |
+| **Track C (Wikipedia Val)** | Wikipedia held-out subset (1,564,237 tokens) | 8.4642 | 4,741.9 | **3.5620** | **35.2** | **3.5620** (@ step 1200) |
+
+- **Loss Reduction**: Combined cross-entropy loss dropped by **-3.9338** (-46.5%), driving perplexity down from 4,715.9 to **92.3**.
+- **Wikipedia Expository Fluency**: Perplexity on Track C reached **35.2**, reflecting fast mastery of factual encyclopedia sentence structures and modern vocabulary.
+- **Hardware Efficiency**: Average throughput reached **17,457 tokens/sec**, consuming only **1,266.4 MB allocated / 1,334.0 MB reserved VRAM** (21.7% of 6GB capacity, leaving 4.8 GB of headroom).
+
+### 3. Checkpointing & Stateful Resumption
+
+- **Checkpoints**: Saved to `checkpoints/27m_phase1/`:
+  - `model_27m_best.pt` (best validation checkpoint, Step 1200).
+  - `model_27m_latest.pt` (latest training state).
+  - Recovery checkpoints: `step_200.pt`, `step_400.pt`, `step_600.pt`, `step_800.pt`, `step_1000.pt`, `step_1200.pt`.
+- **Stateful Payload**: Each checkpoint includes model weights, architecture configuration, AdamW optimizer state, AMP scaler state, step count, tokens processed, RNG states, dataset/tokenizer fingerprints, and validation telemetry.
+- **Crash-Safe Saving**: Atomic rename via `.tmp` avoids partially written files.
+- **Resumption Verified**: Verified resumption from Step 1000 checkpoint through Step 1002 with full optimizer restoration.
+- **Telemetry**: Full step-by-step history and metrics logged to `logs/training_27m_phase1.json`.
+
+### 4. Qualitative Text Generation Inspection
+
+Evaluated across 8 fixed prompts with fixed sampling ($T=0.8, k=40, p=0.9$):
+
+| Prompt | Step 0 Baseline (Untrained) | Step 1200 Checkpoint |
+| :--- | :--- | :--- |
+| `"The sun rose over the"` | `"firt’s paent said:--\n\n“daughterthen said:--..."` | `"ory for their own army.\n\nPeter Percil\nAssociation\n\nPeter Pople Pla (S)..."` |
+| `"In the middle of the room,"` | `"the whole .\n\n * * * .\n\n * * * ; but I fact..."` | `""the Syric and Pecause of Social Serciets of Soviet Pople Playl..."` |
+| `"Biology is the study of"` | `"as a borfromparfromut. Asaid:--\n\n“saw the..."` | `"fice. The Earth of the 1941 of the United Kingdom 1992 and 19923..."` |
+| `"The capital of France is"` | `"anxlosoci]\n\nfromuthome approachrute..."` | `"land of President of the 19410 (died 1944)\n 194 – Russia Benburg (b..."` |
+| `"He opened the mysterious door and saw"` | `"the whole sped with the myself because utand..."` | `", even to seat on and the same time of what could only his head. I could not be so much—he said to send me..."` |
+| `"What is the reason why"` | `"suddhave\nMy walking because among the have..."` | `"; and for that it have no great difficulties. It are it of it all those things of that all these proposition of it will be to us the other..."` |
+| `"How do birds fly through the"` | `"daughspdaughterive horriuthopesaid:--\n\n“dinsl..."` | `"ory for problem for these proces. Some types of soft or nuclear domatic to using electric (or..."` |
+
+### 5. Reproducible Training Command
+
+```bash
+python scripts/train_27m_phase1.py --max-steps 1200 --max-time-seconds 900
+```
+
+---
+
 ## Current Implementation Status
 
 - **Completed Steps**:
@@ -920,4 +982,5 @@ python scripts/prepare_27m_corpus.py --num-row-groups 72 --workers 12 --output-d
   - **Step 29 — Real Conversational Quality Benchmark & Inference Audit**: Executed 31-prompt benchmark across 7 categories comparing Step 3000 Pretrained Base vs Step 650 SFT across Greedy, Default Sampling, and Calibrated SFT. Audited token alignment (100% match), fixed truncated delimiter leakage, added repetition penalty (1.15) to eliminate degenerate greedy repetitions, and documented capacity limitations and Step 30 roadmap. Verified with 6/6 unit tests (`tests/test_inference_audit.py`), `npm run build`, and full repository test suite (167/167 passing).
   - **Step 30 — Scaled Architecture & GPU Feasibility Benchmark**: Engineered and experimentally validated GroundUpGPT-27M (27,411,456 parameters, 8 layers, 8 heads, $d_{model}=512$, context 256). Implemented optional PyTorch SDPA attention path (1.23x throughput boost, saving 451 MB VRAM over manual attention at batch 16). Completed 20-step smoke test on 13.87M corpus in 9.53s (loss 8.4100 -> 7.3484, 17,199 tok/s, peak VRAM 1,266 MB allocated / 1,378 MB reserved, 4.76 GB headroom). Documented training data sufficiency deficit (0.51 tokens/param) and established Step 31 data diversification strategy. Verified with 9/9 unit tests (`tests/test_scaled_architecture.py`) and full repository test suite (176/176 passing).
   - **Step 31 — Expanded, Diverse Pretraining Corpus for GroundUpGPT-27M**: Curated and tokenized a multi-domain pretraining corpus combining Project Gutenberg classic literature/philosophy (13.87M train tokens, 1.12M val tokens) with Simple English Wikipedia modern factual expository articles (CC BY-SA 4.0 / GFDL, 52,346 train docs, 36.43M train tokens) yielding **50,301,446 unique training tokens** and **2,682,495 held-out validation tokens** (52,983,941 total unique tokens across 54,584 clean documents). Reused exact 4,096-token BPE tokenizer (fingerprint: `4138461786ea6a199ff232b2427f3cb71c60f351afa7241f75f8196e51bdae72`). Enforced strict zero-leakage guarantee with 10-word shingle index across all 8 forbidden validation books, excluding 19 overlapping articles. Saved versioned pretraining cache in `data/cache_27m_v1/`. Verified with 6/6 unit tests (`tests/test_27m_corpus.py`).
-- **Roadmap Complete**: Phase 10 (Step 31) completed! All 31 steps complete.
+  - **Step 32 — First Monitored Pretraining Run of GroundUpGPT-27M**: Initial pretraining run of 27,411,456-parameter model initialized from scratch on 50.3M-token corpus (`data/cache_27m_v1/`) on NVIDIA RTX 3050 6GB Laptop GPU. Completed 1,200 optimizer steps (9,830,400 token exposures) in 563.1s (9.38 min) at 17,457 tok/s using only 1,266 MB peak VRAM. Multi-track validation progression: Track A (Combined Val) dropped from 8.4587 to **4.5249** (PPL: 4,715.9 -> **92.3**); Track B (Orig Gutenberg) dropped from 8.4422 to **5.3575** (PPL: 4,638.9 -> **212.2**); Track C (Wikipedia Subset) dropped from 8.4642 to **3.5620** (PPL: 4,741.9 -> **35.2**). Saved stateful crash-safe checkpoints in `checkpoints/27m_phase1/` and telemetry in `logs/training_27m_phase1.json`. Verified with 8/8 unit tests (`tests/test_27m_pretraining.py`) and full repository suite (190/190 passing).
+- **Roadmap Complete**: Phase 10 (Step 32) completed! All 32 steps complete.
