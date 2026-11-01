@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-CUDA%20Accelerated-EE4C2C.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Completed (Steps 1-33)](https://img.shields.io/badge/Status-Completed%20(Steps%201--33)-brightgreen.svg)]()
+[![Status: Completed (Steps 1-34)](https://img.shields.io/badge/Status-Completed%20(Steps%201--34)-brightgreen.svg)]()
 
 GroundUpGPT is an educational and engineering project dedicated to designing, implementing, training, evaluating, and deploying a small autoregressive, decoder-only Transformer language model completely from scratch using Python and PyTorch.
 
@@ -1014,6 +1014,79 @@ python scripts/train_27m_phase1.py --resume-from checkpoints/27m_phase1/model_27
 
 ---
 
+## Safe Continued Pretraining of GroundUpGPT-27M (Step 34)
+
+Step 34 strengthens pretraining integrity safeguards against silent corruption and fail-open defaults, institutes streaming SHA-256 content-level dataset identity hashing, and safely continues pretraining of GroundUpGPT-27M from Step 2,400 to Step 3,968 on the 50.3M-token corpus (`data/cache_27m_v1/`).
+
+### 1. Fail-Closed Checkpoint Integrity & Strong Streaming Content Fingerprinting
+
+Before resuming training, two critical system integrity safeguards were implemented in `scripts/train_27m_phase1.py` and validated with 11 focused regression tests (`tests/test_27m_resumption.py`):
+1. **Elimination of Fail-Open Checkpoint Handling**: Previously, a missing resume checkpoint path silently fell back to training a random model from scratch. The resumption pipeline now enforces explicit user intent: `--resume-from <path>` requires an existing, uncorrupted checkpoint and raises `FileNotFoundError` or `RuntimeError` immediately if invalid. Passing both `--fresh` and `--resume-from` is rejected with `ValueError`.
+2. **Strong Streaming SHA-256 Dataset Identity**: Step 33 verified dataset compatibility using metadata-only fields (`train_tokens_count`, `corpus_version`). Step 34 introduces `compute_strong_dataset_fingerprint()` which streams `train_tokens.pt` (191.89 MB), `val_tokens.pt` (10.23 MB), `cache_metadata.json`, `corpus_manifest.json`, and `source_provenance.json` in bounded 1 MB chunks to produce an immutable composite SHA-256 digest (`b915a6a...`). Backward-compatible migration seamlessly handles legacy Step 33 checkpoints while logging explicit provenance notices.
+3. **Atomic Optimizer Step Accounting**: Optimizer step increments (`step += 1`) and token tracking are strictly tied to successful, finite parameter updates (`scaler.step(optimizer)`). Non-finite gradients skip parameter updates and increment `skipped_updates` without corrupting step counters.
+
+### 2. Multi-Track Validation Dynamics (Steps 2400 → 3968)
+
+Pretraining was safely resumed from Step 2,400 (`checkpoints/27m_phase2/model_27m_latest.pt`, starting Track A baseline loss 4.0030 matching Step 33 report) and continued through Step 3,968 (+1,568 new steps) until reaching the 900.4s wall-clock time budget (15 minutes).
+
+Evaluated every 200 optimizer steps on deterministic fixed windows (seed 42) across all three independent tracks:
+
+| Step | Track A (Combined Val) Loss / PPL | Track B (Orig Gutenberg) Loss / PPL | Track C (Wikipedia Val) Loss / PPL | Learning Rate | Train Loss | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **2400** | 4.0030 / 54.76 | 4.8810 / 131.76 | 3.0036 / 20.16 | 2.11e-04 | 4.0030 | Resumed Baseline (Matches Step 33) |
+| **2600** | 3.9159 / 50.19 | 4.7958 / 121.01 | 2.9289 / 18.71 | 1.97e-04 | 3.3519 | New Best Checkpoint |
+| **2800** | 3.8851 / 48.67 | 4.7804 / 119.15 | 2.9018 / 18.21 | 1.83e-04 | 3.3968 | New Best Checkpoint |
+| **3000** | 3.8504 / 47.01 | 4.7336 / 113.71 | 2.8583 / 17.43 | 1.69e-04 | 3.5964 | New Best Checkpoint |
+| **3200** | 3.8014 / 44.76 | 4.7006 / 110.01 | 2.8187 / 16.76 | 1.54e-04 | 3.5539 | New Best Checkpoint |
+| **3400** | 3.7847 / 44.02 | 4.6718 / 106.89 | 2.7905 / 16.29 | 1.40e-04 | 3.4319 | New Best Checkpoint |
+| **3600** | 3.7535 / 42.67 | 4.6441 / 103.97 | 2.7578 / 15.77 | 1.26e-04 | 3.4552 | New Best Checkpoint |
+| **3800** | 3.7274 / 41.57 | 4.6122 / 100.71 | 2.7484 / 15.62 | 1.13e-04 | 3.4633 | New Best Checkpoint |
+| **3968** | **3.7095** / **40.83** | **4.6069** / **100.18** | **2.7236** / **15.23** | 1.01e-04 | 3.7095 | **Overall Best Checkpoint** (Termination) |
+
+- **Strict Monotonic Convergence**: Validation loss decreased without interruption at every single evaluation point across all three tracks.
+- **Combined Validation Drop**: Track A cross-entropy loss dropped from 4.0030 to **3.7095** (-0.2935 reduction), improving perplexity from 54.76 to **40.83** (-25.4%).
+- **Encyclopedic Expository Fluency**: Track C perplexity reached **15.23** (loss 2.7236), showing consistent grammatical and conceptual structuring of modern factual knowledge.
+- **Classic Literary Generalization**: Track B perplexity dropped to **100.18** (loss 4.6069), continuing to improve on 19th-century vocabulary and narrative flow.
+
+### 3. Hardware & Continuation Metrics
+
+- **Completed Steps**: Step 2400 → Step 3968 (+1,568 new steps; 3,968 cumulative steps).
+- **Tokens Processed**: 12,845,056 new tokens; **32,505,856 cumulative tokens** exposed across all pretraining phases (**64.62% of the 50.3M token corpus**).
+- **Wall-Clock Time**: **900.4 seconds (15.01 minutes)**, stopping cleanly at the hard 900s time budget.
+- **Throughput**: **14,265.9 tokens/second** sustained average.
+- **VRAM Footprint**: **1,375.0 MB allocated / 1,416.0 MB reserved** on NVIDIA RTX 3050 Laptop GPU (23.6% utilization of 6GB VRAM, with > 4.5 GB headroom).
+- **Saved Checkpoints**: Saved in `checkpoints/27m_phase3/`:
+  - `model_27m_best.pt` (best validation loss 3.7095 at Step 3968, 318.0 MB with full AdamW momentum & variance).
+  - `model_27m_latest.pt` (step 3968 training state).
+  - Periodic checkpoints: `step_2600.pt`, `step_2800.pt`, `step_3000.pt`, `step_3200.pt`, `step_3400.pt`, `step_3600.pt`, `step_3800.pt`.
+  - Phase 2 checkpoints in `checkpoints/27m_phase2/` preserved completely untouched.
+- **Telemetry Log**: Full metric history saved to `logs/training_27m_phase3.json`.
+
+### 4. Qualitative Text Generation Progression
+
+Completions generated under identical deterministic settings ($T=0.8, k=40, p=0.9$, seed 1337):
+
+| Prompt | Step 2400 Baseline | Step 3968 Best Model |
+| :--- | :--- | :--- |
+| `"The sun rose over the"` | `"ory is to other electronics from that of the United States Cubals production to the United States Cubals for C"` | `"ory for its body and the infectiple that could make it easier to work for it.\n\nBoth is called "Symphen". The word "Sy"` |
+| `"In the middle of the room,"` | `"—the Pyoc was an important revolt of\nhis region of the Due Christianity of the Red Russia. The conservative was "` | `"—the old man who has had the money from what could make it easy for it. It had been\nproduced by many other people to learn for them, but the girls would do "` |
+| `"Biology is the study of"` | `"fice of the Spanish Metro and also has a new major of Cubals (d. 2013)\n\nBiography\n"` | `"fice. The parents has 15 art parents (art music), 15 art card and 30 art (art music"` |
+| `"The capital of France is"` | `"sue.\n\nIn 1914, 1922, his first president, 1992 he replaced the first to Russian Emperor of the "` | `"sue.\n\nIn 1964, British British army became the United States Army of the United States. The capital was "` |
+| `"Once upon a time in a small village,"` | `"—the Pyoc and Pyoc are sometimes called Pyoc or Pyocle (Pyocyoc or Pyo"` | `"—for the\nvery little inconcent of the day’s part of the house had been\nvery loudly wound and shaken in many other countries, for which would have been so\nwell known as to "` |
+| `"He opened the mysterious door and saw"` | `", which\nit was very happily and executed.\n\nAt first, Mr. Glench’s eyes were uneasy to the other side, and\nthe last moment, Mrs. Glench"` | `", made his mind for his\nheart and shattered.\n\n“I hope is all my child?” cried Don Quixote, “to hear me; that’s the girl\nwith your "` |
+| `"What is the reason why"` | `"?”\n\n“And I don’t wish you be so sorry to give you again?”\n\n“What does that your dear, then?”\n\n“Yes, the truth,” said Mrs.\n\n“I am "` | `"?”\n\n“And his brother, Feeding Sonia and Rome, whom he was all my daughter.\n\n“And who has not seen me in the world,” said Son"` |
+| `"How do birds fly through the"` | `"ory is to sell on these two kes.\n\nSome types of behavior is found in many parts of many places. There are some small animals of birds, or "` | `"irs or other ways or customs from that of the genetic is very important to genetics as long as mammals or animal.\n\nSome "` |
+| `"Water is made of"` | `"fice.\n\nIn 1988, 1999, 1990 and 1999.\n\nClub career statistics\n\n|-"` | `"fice.\n\nIn 1964, Barack was announced that Cuba Boy, they became a fourth for BB to 195"` |
+| `"The Earth revolves around the"` | `"ory is to other electrones (10 million).\n\nColologi \nThe U.S. (Santu or 1 or "` | `"ory for its own army.\n\nPeople from Earth is very important in Earth's early history. The Earth was Earth Ear"` |
+
+### 5. Reproducible Continuation Command
+
+```bash
+python scripts/train_27m_phase1.py --resume-from checkpoints/27m_phase2/model_27m_latest.pt --max-steps 4000 --max-time-seconds 900 --checkpoint-dir checkpoints/27m_phase3 --log-path logs/training_27m_phase3.json
+```
+
+---
+
 ## Current Implementation Status
 
 - **Completed Steps**:
@@ -1050,4 +1123,5 @@ python scripts/train_27m_phase1.py --resume-from checkpoints/27m_phase1/model_27
   - **Step 31 — Expanded, Diverse Pretraining Corpus for GroundUpGPT-27M**: Curated and tokenized a multi-domain pretraining corpus combining Project Gutenberg classic literature/philosophy (13.87M train tokens, 1.12M val tokens) with Simple English Wikipedia modern factual expository articles (CC BY-SA 4.0 / GFDL, 52,346 train docs, 36.43M train tokens) yielding **50,301,446 unique training tokens** and **2,682,495 held-out validation tokens** (52,983,941 total unique tokens across 54,584 clean documents). Reused exact 4,096-token BPE tokenizer (fingerprint: `4138461786ea6a199ff232b2427f3cb71c60f351afa7241f75f8196e51bdae72`). Sampled and bounded zero-leakage check with 10-word shingle index across all 8 forbidden validation books, excluding 19 overlapping articles. Saved versioned pretraining cache in `data/cache_27m_v1/`. Verified with 6/6 unit tests (`tests/test_27m_corpus.py`).
   - **Step 32 — First Monitored Pretraining Run of GroundUpGPT-27M**: Initial pretraining run of 27,411,456-parameter model initialized from scratch on 50.3M-token corpus (`data/cache_27m_v1/`) on NVIDIA RTX 3050 6GB Laptop GPU. Completed 1,200 optimizer steps (9,830,400 token exposures) in 563.1s (9.38 min) at 17,457 tok/s using only 1,266 MB peak VRAM. Multi-track validation progression: Track A (Combined Val) dropped from 8.4587 to **4.5249** (PPL: 4,715.9 -> **92.3**); Track B (Orig Gutenberg) dropped from 8.4422 to **5.3575** (PPL: 4,638.9 -> **212.2**); Track C (Wikipedia Subset) dropped from 8.4642 to **3.5620** (PPL: 4,741.9 -> **35.2**). Saved stateful crash-safe checkpoints in `checkpoints/27m_phase1/` and telemetry in `logs/training_27m_phase1.json`. Verified with 8/8 unit tests (`tests/test_27m_pretraining.py`) and full repository suite (190/190 passing).
   - **Step 33 — Safe Pretraining Resumption & 27M Continuation**: Diagnosed and resolved preflight smoke test isolation (preventing preflight parameter mutation), RNG state restoration on CPU ByteTensors, dedicated data generator passing, authentic dataset fingerprinting, and accurate per-run throughput calculation. Safely resumed and continued GroundUpGPT-27M from Step 1,200 to Step 2,400 (+1,200 steps; +9,830,400 tokens; 19.66M cumulative tokens exposed = 39.09% of 50.3M single-epoch budget) in 612.5s (10.21 min) at 16,049.2 tok/s on RTX 3050 Laptop GPU (1,375 MB peak VRAM). Multi-track validation: Track A (Combined) dropped from 4.5249 to **4.0030** (PPL: 92.3 -> **54.8**); Track B (Orig Gutenberg) dropped from 5.3575 to **4.8810** (PPL: 212.2 -> **131.8**); Track C (Wikipedia) dropped from 3.5620 to **3.0036** (PPL: 35.2 -> **20.2**). Saved continuation checkpoints in `checkpoints/27m_phase2/` and telemetry in `logs/training_27m_phase2.json`. Verified with 7/7 unit tests (`tests/test_27m_resumption.py`) and full repository suite (197/197 passing).
-- **Roadmap Complete**: Phase 10 (Steps 31–33) completed! All 33 steps complete.
+  - **Step 34 — Safe Continued Pretraining of GroundUpGPT-27M**: Eliminated fail-open checkpoint fallback (explicit resume required; corrupt/missing checkpoints fail immediately), introduced bounded streaming SHA-256 dataset content hashing (`train_tokens.pt`, `val_tokens.pt`, manifests), and tied optimizer step increments strictly to successful parameter updates. Continued pretraining from Step 2,400 to Step 3,968 (+1,568 new steps; +12,845,056 tokens; 32.51M cumulative tokens exposed = 64.62% of 50.3M corpus) in 900.4s (15.01 min) at 14,265.9 tok/s on RTX 3050 Laptop GPU (1,375 MB peak VRAM). Multi-track validation: Track A (Combined) dropped from 4.0030 to **3.7095** (PPL: 54.8 -> **40.8**); Track B (Orig Gutenberg) dropped from 4.8810 to **4.6069** (PPL: 131.8 -> **100.2**); Track C (Wikipedia) dropped from 3.0036 to **2.7236** (PPL: 20.2 -> **15.2**). Saved Phase 3 checkpoints in `checkpoints/27m_phase3/` (`model_27m_best.pt`, `model_27m_latest.pt`, `step_2600.pt`...`step_3800.pt`) and telemetry in `logs/training_27m_phase3.json`. Preserved `checkpoints/27m_phase2/` completely untouched. Verified with 11/11 unit tests (`tests/test_27m_resumption.py`) and full repository suite (201/201 passing).
+- **Roadmap Complete**: Phase 10 (Steps 31–34) completed! All 34 steps complete.

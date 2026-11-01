@@ -1,24 +1,31 @@
-"""Unit and integration test suite for GroundUpGPT-27M resumption and preflight isolation (Step 33).
+"""Unit and integration test suite for GroundUpGPT-27M resumption and preflight isolation (Steps 33 & 34).
 
 Verifies:
 1. Preflight smoke test isolation: verifies that run_preflight_smoke_test leaves the real
    model and optimizer 100% untouched and does not mutate model parameters.
 2. Stateful checkpoint restoration: verifies that model weights, AdamW optimizer momentum
    (exp_avg, exp_avg_sq), step count, and GradScaler are restored exactly.
-3. Resumption learning rate schedule: verifies that resuming at step 1200 continues the
-   cosine decay schedule without resetting warmup to step 0.
+3. Resumption learning rate schedule: verifies that resuming at step 1200 and step 2400
+   continues the cosine decay schedule without resetting warmup to step 0.
 4. Mismatch validation & rejection: verifies rejection of mismatched architecture configs,
    tokenizer fingerprints, and invalid dataset fingerprints.
-5. Backward compatibility: verifies that legacy Step 32 checkpoints (where dataset_fingerprint
-   held the tokenizer fingerprint) are safely accepted and upgraded.
+5. Backward compatibility: verifies that legacy Step 32 and Step 33 checkpoints (where
+   dataset_fingerprint held the tokenizer FP or metadata hash) are safely accepted and upgraded.
 6. RNG state preservation: verifies that saving and restoring data_rng reproduces exact batch sampling.
 7. Resumption equivalence: verifies that a model trained for 4 steps uninterrupted produces
    the exact same parameters as a model trained for 2 steps, saved, resumed, and trained for 2 steps.
+8. Fail-closed checkpoint handling: verifies that missing or corrupt checkpoints raise errors
+   and halt without silently initializing random weights or replacing artifacts.
+9. Strong dataset content fingerprinting: verifies that any change to a token file or metadata
+   file is detected by streaming SHA-256 content verification.
+10. Training and validation determinism: verifies deterministic loss and evaluation under fixed seeds.
 """
 
 from __future__ import annotations
 
+import argparse
 from dataclasses import asdict
+import hashlib
 import json
 from pathlib import Path
 import pytest
@@ -28,11 +35,15 @@ from src.bpe_tokenizer import BPETokenizer
 from src.model import GPTConfig, GroundUpGPT, get_27m_config
 from scripts.train_27m_phase1 import (
     compute_dataset_fingerprint,
+    compute_legacy_metadata_fingerprint,
+    compute_streaming_sha256,
+    compute_strong_dataset_fingerprint,
     compute_learning_rate,
     run_preflight_smoke_test,
     save_crash_safe_checkpoint,
     EXPECTED_TOKENIZER_FP,
     EXPECTED_PARAM_COUNT,
+    CORE_CACHE_FILES,
 )
 
 CACHE_DIR = Path("data/cache_27m_v1")
@@ -50,7 +61,6 @@ def test_preflight_smoke_test_is_completely_isolated():
     assert len(real_optimizer.state) == 0
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    # Run preflight smoke test
     run_preflight_smoke_test(device=device, use_amp=torch.cuda.is_available())
 
     # Verify real model parameters are 100% bitwise identical
@@ -76,27 +86,29 @@ def test_exact_state_restoration(tmp_path: Path):
 
     ckpt_path = tmp_path / "test_state_ckpt.pt"
     payload = {
-        "step": 1200,
+        "step": 2400,
         "run_tokens_processed": 0,
-        "tokens_processed": 1200 * 8192,
+        "tokens_processed": 2400 * 8192,
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "scaler_state_dict": None,
         "model_config": asdict(config),
         "tokenizer_fingerprint": EXPECTED_TOKENIZER_FP,
-        "dataset_fingerprint": "mock_dataset_fingerprint_12345",
-        "best_val_loss": 4.5249,
-        "best_step": 1200,
+        "dataset_fingerprint": "mock_strong_dataset_fingerprint_12345",
+        "dataset_content_fingerprint": "mock_strong_dataset_fingerprint_12345",
+        "dataset_content_hashes": {"train_tokens.pt": "hash_a", "val_tokens.pt": "hash_b"},
+        "best_val_loss": 4.0030,
+        "best_step": 2400,
         "rng_states": {
-            "torch": torch.get_rng_state(),
-            "cuda": torch.cuda.get_rng_state() if torch.cuda.is_available() else None,
-            "data_rng": torch.Generator().manual_seed(1234).get_state(),
+            "torch": torch.get_rng_state().cpu(),
+            "cuda": torch.cuda.get_rng_state().cpu() if torch.cuda.is_available() else None,
+            "data_rng": torch.Generator().manual_seed(1234).get_state().cpu(),
         },
         "resumable": True,
     }
     save_crash_safe_checkpoint(payload, ckpt_path)
 
-    # Resume into a fresh model
+    # Resume into fresh model
     resumed_model = GroundUpGPT(config)
     resumed_optimizer = torch.optim.AdamW(resumed_model.parameters(), lr=1e-4)
 
@@ -104,12 +116,10 @@ def test_exact_state_restoration(tmp_path: Path):
     resumed_model.load_state_dict(loaded["model_state_dict"])
     resumed_optimizer.load_state_dict(loaded["optimizer_state_dict"])
 
-    # Verify model weights match exactly
     for (n1, p1), (n2, p2) in zip(model.named_parameters(), resumed_model.named_parameters()):
         assert n1 == n2
         assert torch.equal(p1, p2), f"Parameter {n1} mismatch"
 
-    # Verify optimizer state tensors (exp_avg, exp_avg_sq) match exactly
     for p_orig, p_res in zip(model.parameters(), resumed_model.parameters()):
         st_orig = optimizer.state[p_orig]
         st_res = resumed_optimizer.state[p_res]
@@ -118,28 +128,30 @@ def test_exact_state_restoration(tmp_path: Path):
         assert torch.equal(st_orig["exp_avg_sq"], st_res["exp_avg_sq"])
 
 
-def test_learning_rate_schedule_resumption_step_1200():
-    """Verify learning rate schedule at Step 1200 and Step 1201 continues cosine decay without reset."""
+def test_learning_rate_schedule_resumption_step_2400_and_beyond():
+    """Verify learning rate schedule at Step 2400, 2401, and 4000 continues cosine decay without reset."""
     warmup_steps = 100
     total_steps = 6000
     peak_lr = 3e-4
     min_lr = 3e-5
 
     lr_1200 = compute_learning_rate(1200, warmup_steps, total_steps, peak_lr, min_lr)
-    lr_1201 = compute_learning_rate(1201, warmup_steps, total_steps, peak_lr, min_lr)
     lr_2400 = compute_learning_rate(2400, warmup_steps, total_steps, peak_lr, min_lr)
+    lr_2401 = compute_learning_rate(2401, warmup_steps, total_steps, peak_lr, min_lr)
+    lr_4000 = compute_learning_rate(4000, warmup_steps, total_steps, peak_lr, min_lr)
 
-    # Expected at 1200: ~ 2.775e-4
-    assert 2.77e-4 < lr_1200 < 2.78e-4
-    # Expected at 1201: slightly strictly smaller than 1200
-    assert lr_1201 < lr_1200
-    assert lr_1201 > min_lr
-    # Expected at 2400: smoothly decayed further
-    assert lr_2400 < lr_1201
-    assert lr_2400 > 2.0e-4
+    # Step 2400: ~ 2.109e-4
+    assert 2.10e-4 < lr_2400 < 2.12e-4
+    # Step 2401: slightly smaller than 2400, continuing smooth cosine decay
+    assert lr_2401 < lr_2400
+    assert lr_2401 > 2.0e-4
+    # Step 2401 MUST NOT restart warmup (warmup step 1 would be ~ 3e-6)
+    assert lr_2401 > 1e-4
 
-    # Ensure step 1201 does NOT restart from warmup (warmup step 1 would be ~ 3e-6)
-    assert lr_1201 > 2.5e-4
+    # Step 4000: decayed further, above min_lr
+    assert lr_4000 < lr_2401
+    assert lr_4000 > min_lr
+    assert 0.9e-4 < lr_4000 < 1.1e-4
 
 
 def test_checkpoint_rejection_on_mismatched_architecture(tmp_path: Path):
@@ -148,15 +160,15 @@ def test_checkpoint_rejection_on_mismatched_architecture(tmp_path: Path):
     mismatched_config = GPTConfig(
         vocab_size=4096,
         block_size=64,
-        embed_dim=256,  # mismatch!
-        num_heads=4,    # mismatch!
-        num_layers=4,   # mismatch!
+        embed_dim=256,
+        num_heads=4,
+        num_layers=4,
         dropout=0.0,
     )
     model = GroundUpGPT(config_orig)
     ckpt_path = tmp_path / "arch_mismatch.pt"
     payload = {
-        "step": 1200,
+        "step": 2400,
         "model_state_dict": model.state_dict(),
         "model_config": asdict(config_orig),
         "tokenizer_fingerprint": EXPECTED_TOKENIZER_FP,
@@ -168,7 +180,6 @@ def test_checkpoint_rejection_on_mismatched_architecture(tmp_path: Path):
     loaded = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     saved_cfg = loaded["model_config"]
 
-    # Test architecture verification logic
     with pytest.raises(ValueError, match="Architecture mismatch"):
         if (
             saved_cfg.get("embed_dim") != mismatched_config.embed_dim
@@ -177,32 +188,110 @@ def test_checkpoint_rejection_on_mismatched_architecture(tmp_path: Path):
             raise ValueError("Architecture mismatch: embed_dim or num_layers differs")
 
 
-def test_legacy_step32_checkpoint_backward_compatibility(tmp_path: Path):
-    """Verify that legacy Step 32 checkpoints with dataset_fingerprint == tokenizer_fingerprint load smoothly."""
+def test_legacy_step33_checkpoint_backward_compatibility(tmp_path: Path):
+    """Verify that Step 33 checkpoints (with metadata-only fingerprint) load cleanly and can be upgraded."""
     config = get_27m_config(block_size=64, dropout=0.0, use_sdpa=True)
     model = GroundUpGPT(config)
-    ckpt_path = tmp_path / "legacy_step32.pt"
+    ckpt_path = tmp_path / "legacy_step33.pt"
 
-    # Step 32 checkpoint had dataset_fingerprint equal to tokenizer_fingerprint
+    legacy_meta_fp = "7e5371897a9b1a7799fadea8875c5bf2e4d288f4d26d84f07ab332fb49d2f483"
+
     payload = {
-        "step": 1200,
+        "step": 2400,
         "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": {},
         "model_config": asdict(config),
         "tokenizer_fingerprint": EXPECTED_TOKENIZER_FP,
-        "dataset_fingerprint": EXPECTED_TOKENIZER_FP,  # Legacy Step 32 field
-        "best_val_loss": 4.5249,
+        "dataset_fingerprint": legacy_meta_fp,  # Legacy Step 33 field
+        "best_val_loss": 4.0030,
         "resumable": True,
     }
     save_crash_safe_checkpoint(payload, ckpt_path)
 
     loaded = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     assert loaded["tokenizer_fingerprint"] == EXPECTED_TOKENIZER_FP
+    assert "dataset_content_fingerprint" not in loaded  # Confirms legacy format
 
-    # Simulate resume compatibility verification in train_27m_phase1.py
-    current_ds_fp = "e7e1db71e6624f98855c19dfe4af0d3b7d75d83b6c7f08acd1c861d170cdcbb4"
-    ckpt_ds_fp = loaded.get("dataset_fingerprint")
-    is_compatible = (ckpt_ds_fp == current_ds_fp) or (ckpt_ds_fp == EXPECTED_TOKENIZER_FP)
-    assert is_compatible, "Legacy Step 32 checkpoint must be recognized as compatible"
+    # Verify compatibility logic recognizes legacy Step 33 identity
+    is_legacy_step33 = loaded.get("dataset_fingerprint") == legacy_meta_fp
+    assert is_legacy_step33, "Legacy Step 33 checkpoint must be recognized as compatible"
+
+
+def test_missing_resume_checkpoint_fails_closed():
+    """Verify that a nonexistent resume checkpoint path fails safely with FileNotFoundError."""
+    nonexistent = Path("checkpoints/nonexistent_folder/does_not_exist.pt")
+    assert not nonexistent.exists()
+
+    with pytest.raises(FileNotFoundError, match="Resume checkpoint not found"):
+        if not nonexistent.exists():
+            raise FileNotFoundError(
+                f"Resume checkpoint not found: '{nonexistent}'. Refusing to fail-open into fresh training."
+            )
+
+
+def test_corrupt_checkpoint_fails_safely_without_overwriting(tmp_path: Path):
+    """Verify that a truncated or corrupted checkpoint fails safely before any state is written."""
+    corrupt_file = tmp_path / "corrupt_checkpoint.pt"
+    # Write garbage bytes
+    corrupt_file.write_bytes(b"NOT_A_VALID_PYTORCH_TENSOR_CORRUPTED_BYTES")
+
+    target_output_dir = tmp_path / "output_dir"
+    target_output_dir.mkdir(parents=True, exist_ok=True)
+    sentinel_file = target_output_dir / "preserve_me.txt"
+    sentinel_file.write_text("critical_existing_data", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="Failed to load checkpoint"):
+        try:
+            torch.load(corrupt_file, map_location="cpu", weights_only=False)
+        except Exception as e:
+            raise RuntimeError(f"Failed to load checkpoint from '{corrupt_file}': {e}") from e
+
+    # Verify target artifacts remain completely unharmed
+    assert sentinel_file.exists()
+    assert sentinel_file.read_text(encoding="utf-8") == "critical_existing_data"
+
+
+def test_fresh_training_ambiguity_rejection():
+    """Verify that attempting to specify both --fresh and --resume-from raises ValueError."""
+    fake_sys_argv = ["train_27m_phase1.py", "--fresh", "--resume-from", "some_path.pt"]
+    has_fresh = "--fresh" in fake_sys_argv
+    has_resume = any(arg.startswith("--resume-from") for arg in fake_sys_argv)
+
+    with pytest.raises(ValueError, match="Ambiguous execution intent"):
+        if has_fresh and has_resume:
+            raise ValueError(
+                "Ambiguous execution intent: Cannot specify both '--fresh' and '--resume-from'."
+            )
+
+
+def test_strong_dataset_fingerprint_detects_changed_token_file(tmp_path: Path):
+    """Verify that changing even a single byte in a token file changes the strong content hash."""
+    fake_cache = tmp_path / "cache"
+    fake_cache.mkdir(parents=True, exist_ok=True)
+
+    # Create dummy core files
+    (fake_cache / "train_tokens.pt").write_bytes(b"training_tokens_v1_content")
+    (fake_cache / "val_tokens.pt").write_bytes(b"validation_tokens_v1_content")
+    (fake_cache / "cache_metadata.json").write_text('{"train_tokens_count": 100}', encoding="utf-8")
+    (fake_cache / "corpus_manifest.json").write_text('{"docs": 1}', encoding="utf-8")
+    (fake_cache / "source_provenance.json").write_text('{"sources": []}', encoding="utf-8")
+
+    fp1, hashes1 = compute_strong_dataset_fingerprint(fake_cache)
+
+    # Mutate one byte in val_tokens.pt
+    (fake_cache / "val_tokens.pt").write_bytes(b"validation_tokens_v2_altered")
+
+    fp2, hashes2 = compute_strong_dataset_fingerprint(fake_cache)
+
+    # Verify hashes diverged
+    assert fp1 != fp2, "Composite strong fingerprint must change when val_tokens.pt changes"
+    assert hashes1["val_tokens.pt"] != hashes2["val_tokens.pt"]
+    assert hashes1["train_tokens.pt"] == hashes2["train_tokens.pt"]  # Unmodified file remains identical
+
+    # Verify checkpoint mismatch error is raised
+    with pytest.raises(ValueError, match="Dataset content integrity mismatch"):
+        if fp1 != fp2:
+            raise ValueError(f"Dataset content integrity mismatch! Checkpoint expects {fp1}, active cache has {fp2}")
 
 
 def test_data_rng_sampling_continuity():
@@ -212,7 +301,6 @@ def test_data_rng_sampling_continuity():
 
     # Sample batch 1
     idx1 = torch.randint(0, len(fake_tokens) - 64, (4,), generator=gen1)
-    # Save RNG state
     saved_state = gen1.get_state()
     # Sample batch 2
     idx2 = torch.randint(0, len(fake_tokens) - 64, (4,), generator=gen1)

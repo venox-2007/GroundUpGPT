@@ -1,23 +1,23 @@
-"""Monitored Pretraining and Crash-Safe Resumption for GroundUpGPT-27M (Steps 32 & 33).
+"""Monitored Pretraining and Crash-Safe Resumption for GroundUpGPT-27M (Steps 32, 33 & 34).
 
-Key Guarantees & Fixes (Step 33):
-1. Non-Destructive Isolated Preflight:
+Key Guarantees & Safeguards (Step 34):
+1. Fail-Closed Checkpoint Resumption:
+   Explicitly requires a valid resume checkpoint or explicit --fresh flag. Missing or
+   corrupt checkpoints halt training immediately before touching any model or disk artifacts.
+2. Strong Cryptographic Dataset Fingerprinting:
+   Streams large token tensors (train_tokens.pt, val_tokens.pt) and metadata in 1MB bounded
+   memory chunks to generate bitwise SHA-256 hashes, with backward-compatible migration
+   for Step 33 legacy metadata-only checkpoints.
+3. Isolated Non-Destructive Preflight:
    Device micro-preflight runs on a separate temporary model/optimizer instance,
    guaranteeing the real model's weights and optimizer momentum remain 100% untouched.
-2. Verified Stateful Resumption:
+4. Verified Stateful Resumption:
    Restores exact model weights, AdamW optimizer state (exp_avg, exp_avg_sq), AMP GradScaler,
    step count, learning rate schedule, and RNG states (torch, cuda, data_rng).
-3. Dedicated Deterministic Data Generator:
-   Explicit data_rng generator is passed to pipeline.get_batch() and saved in checkpoint rng_states.
-4. Genuine Dataset Fingerprinting:
-   Computes SHA-256 fingerprint over dataset metadata, with backward-compatible migration
-   for legacy Step 32 checkpoints.
-5. Strict Architecture Compatibility:
-   Validates vocab_size, block_size, embed_dim, num_heads, num_layers, and use_sdpa before loading.
-6. Per-Run Throughput Accuracy:
-   Tracks run_tokens_processed separately from cumulative_tokens_processed, preventing
-   historical token totals from distorting per-run throughput measurements.
-7. Multi-Track Deterministic Validation:
+5. Accurate Per-Run & Optimizer Accounting:
+   Disentangles run tokens from cumulative tokens and only advances optimizer step count
+   upon verified, finite gradient updates.
+6. Multi-Track Deterministic Validation:
    Evaluates Track A (Combined), Track B (Orig Gutenberg), and Track C (Simple Wikipedia) on
    fixed deterministic windows.
 """
@@ -61,6 +61,14 @@ logger = logging.getLogger("train_27m")
 EXPECTED_TOKENIZER_FP = "4138461786ea6a199ff232b2427f3cb71c60f351afa7241f75f8196e51bdae72"
 EXPECTED_PARAM_COUNT = 27411456
 
+CORE_CACHE_FILES = [
+    "train_tokens.pt",
+    "val_tokens.pt",
+    "cache_metadata.json",
+    "corpus_manifest.json",
+    "source_provenance.json",
+]
+
 INSPECTION_PROMPTS = [
     # Ordinary English sentence starters
     "The sun rose over the",
@@ -74,14 +82,45 @@ INSPECTION_PROMPTS = [
     # Question-like starters
     "What is the reason why",
     "How do birds fly through the",
-    # Additional simple factual sentence-completion prefixes (Step 33)
+    # Additional simple factual sentence-completion prefixes (Step 33/34)
     "Water is made of",
     "The Earth revolves around the",
 ]
 
 
-def compute_dataset_fingerprint(cache_dir: Path) -> str:
-    """Compute deterministic SHA-256 fingerprint of pretraining dataset cache."""
+def compute_streaming_sha256(file_path: Path, chunk_size: int = 1024 * 1024) -> str:
+    """Compute SHA-256 hash of a file using streaming reads with bounded memory."""
+    if not file_path.exists():
+        raise FileNotFoundError(f"Cannot hash non-existent file: {file_path}")
+    h = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        while chunk := f.read(chunk_size):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def compute_strong_dataset_fingerprint(cache_dir: Path) -> Tuple[str, Dict[str, str]]:
+    """Compute strong dataset identity comprising individual file hashes and composite SHA-256.
+
+    Streams large token files (train_tokens.pt, val_tokens.pt) in 1MB chunks to ensure
+    bounded memory usage while providing cryptographic bitwise content verification.
+    """
+    file_hashes: Dict[str, str] = {}
+    for filename in CORE_CACHE_FILES:
+        p = cache_dir / filename
+        if not p.exists():
+            raise FileNotFoundError(f"Missing core cache file for content verification: {p}")
+        file_hashes[filename] = compute_streaming_sha256(p)
+
+    composite = hashlib.sha256()
+    for filename in sorted(file_hashes.keys()):
+        composite.update(f"{filename}:{file_hashes[filename]}\n".encode("utf-8"))
+
+    return composite.hexdigest(), file_hashes
+
+
+def compute_legacy_metadata_fingerprint(cache_dir: Path) -> str:
+    """Compute Step 33 legacy metadata-only fingerprint (for backward compatibility)."""
     meta_path = cache_dir / "cache_metadata.json"
     if not meta_path.exists():
         raise FileNotFoundError(f"Missing cache metadata: {meta_path}")
@@ -96,14 +135,31 @@ def compute_dataset_fingerprint(cache_dir: Path) -> str:
     return h.hexdigest()
 
 
+def compute_dataset_fingerprint(cache_dir: Path) -> str:
+    """Primary dataset fingerprint returning the strong content-based composite SHA-256."""
+    strong_fp, _ = compute_strong_dataset_fingerprint(cache_dir)
+    return strong_fp
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Monitored Pretraining and Resumption of GroundUpGPT-27M.")
     parser.add_argument("--cache-dir", type=Path, default=Path("data/cache_27m_v1"), help="Pretraining token cache directory.")
     parser.add_argument("--tokenizer-path", type=Path, default=Path("checkpoints/bpe_vocab4096.json"), help="BPE tokenizer path.")
-    parser.add_argument("--checkpoint-dir", type=Path, default=Path("checkpoints/27m_phase2"), help="Output checkpoint directory.")
-    parser.add_argument("--log-path", type=Path, default=Path("logs/training_27m_phase2.json"), help="Telemetry JSON output path.")
-    parser.add_argument("--resume-from", type=Path, default=Path("checkpoints/27m_phase1/model_27m_latest.pt"), help="Checkpoint to resume from.")
-    parser.add_argument("--max-steps", type=int, default=2400, help="Target ending optimizer step (default: 2400).")
+    parser.add_argument("--checkpoint-dir", type=Path, default=Path("checkpoints/27m_phase3"), help="Output checkpoint directory.")
+    parser.add_argument("--log-path", type=Path, default=Path("logs/training_27m_phase3.json"), help="Telemetry JSON output path.")
+    parser.add_argument(
+        "--resume-from",
+        type=Path,
+        default=Path("checkpoints/27m_phase2/model_27m_latest.pt"),
+        help="Path to checkpoint to resume from (default: checkpoints/27m_phase2/model_27m_latest.pt).",
+    )
+    parser.add_argument(
+        "--fresh",
+        action="store_true",
+        default=False,
+        help="Explicitly initialize a new model from scratch. Mutually exclusive with --resume-from.",
+    )
+    parser.add_argument("--max-steps", type=int, default=4000, help="Target ending optimizer step (default: 4000).")
     parser.add_argument("--max-time-seconds", type=float, default=900.0, help="Maximum training wall time in seconds (default: 900s = 15m).")
     parser.add_argument("--micro-batch-size", type=int, default=8, help="Sequences per micro-batch (default: 8).")
     parser.add_argument("--grad-accum", type=int, default=4, help="Gradient accumulation steps (effective batch: 32 seqs = 8192 tokens).")
@@ -275,10 +331,12 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
     meta = pipeline.metadata or {}
     total_train_tokens = len(pipeline.train_tokens)
     total_val_tokens = len(pipeline.val_tokens)
-    current_dataset_fp = compute_dataset_fingerprint(args.cache_dir)
+    current_dataset_fp, current_file_hashes = compute_strong_dataset_fingerprint(args.cache_dir)
+    current_legacy_metadata_fp = compute_legacy_metadata_fingerprint(args.cache_dir)
     print(f"[*] Dataset Train Tokens:  {total_train_tokens:,}")
     print(f"[*] Dataset Val Tokens:    {total_val_tokens:,}")
-    print(f"[*] Dataset Fingerprint:   {current_dataset_fp}")
+    print(f"[*] Dataset Content FP:    {current_dataset_fp}")
+    print(f"[*] Legacy Metadata FP:   {current_legacy_metadata_fp}")
 
     # 3. Load Validation Tracks
     track_A_tokens = pipeline.val_tokens
@@ -348,11 +406,43 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
     data_rng = torch.Generator(device="cpu")
     data_rng.manual_seed(args.seed)
 
-    # 7. Checkpoint Resumption (with validation and legacy compatibility)
+    # 7. Checkpoint Resumption (Fail-Closed, Content-Hashed & Legacy-Compatible)
     is_resumed = False
-    if args.resume_from and Path(args.resume_from).exists():
+    if args.fresh:
+        if any(arg.startswith("--resume-from") for arg in sys.argv):
+            raise ValueError(
+                "Ambiguous execution intent: Cannot specify both '--fresh' and '--resume-from'. "
+                "Specify '--fresh' for fresh training from scratch, or '--resume-from <path>' to resume."
+            )
+        logger.warning("[*] Explicit --fresh flag provided: Initializing GroundUpGPT-27M from scratch.")
+        is_resumed = False
+    else:
+        if not args.resume_from:
+            raise ValueError(
+                "No resume checkpoint specified and --fresh was not set. "
+                "Specify --resume-from <path> to resume, or --fresh to initialize from scratch."
+            )
         ckpt_path = Path(args.resume_from)
-        ckpt = torch.load(ckpt_path, map_location=resolved_device, weights_only=False)
+        if not ckpt_path.exists():
+            raise FileNotFoundError(
+                f"Resume checkpoint not found: '{ckpt_path}'. "
+                f"Refusing to fail-open into fresh training. "
+                f"Ensure the checkpoint exists or explicitly pass '--fresh' if scratch initialization is intended."
+            )
+
+        try:
+            ckpt = torch.load(ckpt_path, map_location=resolved_device, weights_only=False)
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to load checkpoint from '{ckpt_path}' (corrupt or unreadable file): {e}. "
+                f"Training halted immediately to protect existing artifacts."
+            ) from e
+
+        # Validate required checkpoint keys
+        for req_k in ["step", "model_state_dict", "optimizer_state_dict", "model_config"]:
+            if req_k not in ckpt:
+                raise ValueError(f"Corrupt checkpoint '{ckpt_path}': missing required key '{req_k}'.")
+
         is_resumed = True
 
         # A. Strict Architecture Compatibility Check
@@ -374,21 +464,49 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
                 f"active tokenizer is {tok_fp}."
             )
 
-        # C. Dataset Fingerprint Validation with Legacy Step 32 Fallback
-        stored_ds_fp = ckpt.get("dataset_fingerprint")
-        if stored_ds_fp == current_dataset_fp:
-            logger.info(f"[*] Validated genuine dataset fingerprint: {stored_ds_fp[:16]}...")
-        elif stored_ds_fp == EXPECTED_TOKENIZER_FP and ckpt.get("step") == 1200:
-            logger.info(
-                f"[*] Detected legacy Step 32 checkpoint format (dataset_fingerprint was assigned "
-                f"tokenizer FP). Verified against active cache ({total_train_tokens:,} tokens). "
-                f"Will record genuine dataset FP in new checkpoints."
-            )
+        # C. Dataset Fingerprint Validation (Content Integrity & Legacy Compatibility)
+        has_content_fp = "dataset_content_fingerprint" in ckpt
+        has_content_hashes = "dataset_content_hashes" in ckpt
+
+        if has_content_fp and has_content_hashes:
+            ckpt_content_fp = ckpt["dataset_content_fingerprint"]
+            ckpt_file_hashes = ckpt.get("dataset_content_hashes", {})
+            if ckpt_content_fp != current_dataset_fp:
+                diffs = [
+                    f"{fn} (ckpt: {ckpt_file_hashes.get(fn, 'missing')[:8]}, active: {current_file_hashes.get(fn, 'missing')[:8]})"
+                    for fn in CORE_CACHE_FILES
+                    if ckpt_file_hashes.get(fn) != current_file_hashes.get(fn)
+                ]
+                diff_str = ", ".join(diffs) if diffs else "composite digest mismatch"
+                raise ValueError(
+                    f"Dataset content integrity mismatch! Checkpoint expects content hash {ckpt_content_fp}, "
+                    f"active cache has {current_dataset_fp}. Divergent files: {diff_str}"
+                )
+            logger.info(f"[*] Validated strong dataset content integrity hash: {current_dataset_fp[:16]}... (all {len(CORE_CACHE_FILES)} cache files bitwise verified)")
         else:
-            raise ValueError(
-                f"Dataset fingerprint mismatch! Checkpoint expects {stored_ds_fp}, "
-                f"active dataset cache fingerprint is {current_dataset_fp}."
-            )
+            # Legacy checkpoint (Step 33 or Step 32)
+            stored_ds_fp = ckpt.get("dataset_fingerprint")
+            if stored_ds_fp == current_legacy_metadata_fp:
+                logger.info(
+                    f"[*] Detected legacy Step 33 checkpoint format (metadata-only fingerprint: {stored_ds_fp[:16]}...). "
+                    f"Verified metadata matches active cache ({total_train_tokens:,} tokens)."
+                )
+                logger.info(
+                    "[*] Note: Historical metadata-only fingerprint cannot retrospectively prove that original "
+                    "token bytes were identical, but active cache content integrity has now been verified via "
+                    "streaming SHA-256 hashes."
+                )
+                logger.info("[*] Migrating checkpoint identity to strong content hashes for Step 34+.")
+            elif stored_ds_fp == EXPECTED_TOKENIZER_FP and ckpt.get("step") == 1200:
+                logger.info(
+                    f"[*] Detected legacy Step 32 checkpoint format (dataset_fingerprint was assigned tokenizer FP). "
+                    f"Verified against active cache ({total_train_tokens:,} tokens). Migrating to strong content hashes."
+                )
+            else:
+                raise ValueError(
+                    f"Dataset fingerprint mismatch! Checkpoint expects {stored_ds_fp}, "
+                    f"active dataset cache legacy metadata fingerprint is {current_legacy_metadata_fp}."
+                )
 
         # D. State Restoration
         start_step = ckpt["step"]
@@ -442,11 +560,18 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
     print(f"    -> Track C (Wikipedia Val):  Loss: {base_loss_C:.4f} | PPL: {base_ppl_C:.2f}")
 
     if is_resumed:
-        # Compare against Step 32 report values
-        print(f"[*] Baseline Verification vs Step 32 Report:")
-        print(f"    Track A: {base_loss_A:.4f} (Step 32 reported: 4.5249)")
-        print(f"    Track B: {base_loss_B:.4f} (Step 32 reported: 5.3575)")
-        print(f"    Track C: {base_loss_C:.4f} (Step 32 reported: 3.5620)")
+        if start_step == 2400:
+            print(f"[*] Baseline Verification vs Step 33 Report:")
+            print(f"    Track A: {base_loss_A:.4f} (Step 33 reported: 4.0030)")
+            print(f"    Track B: {base_loss_B:.4f} (Step 33 reported: 4.8810)")
+            print(f"    Track C: {base_loss_C:.4f} (Step 33 reported: 3.0036)")
+            if abs(base_loss_A - 4.0030) > 0.05:
+                logger.warning(f"Baseline Track A loss ({base_loss_A:.4f}) deviates from expected (4.0030)!")
+        elif start_step == 1200:
+            print(f"[*] Baseline Verification vs Step 32 Report:")
+            print(f"    Track A: {base_loss_A:.4f} (Step 32 reported: 4.5249)")
+            print(f"    Track B: {base_loss_B:.4f} (Step 32 reported: 5.3575)")
+            print(f"    Track C: {base_loss_C:.4f} (Step 32 reported: 3.5620)")
 
     print(f"\n[*] Generating qualitative text inspection samples at Step {eval_step_label}...")
     baseline_samples = generate_inspection_samples(model, tokenizer, INSPECTION_PROMPTS, device=resolved_device, seed=args.seed)
@@ -455,6 +580,11 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
 
     args.checkpoint_dir.mkdir(parents=True, exist_ok=True)
     args.log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if is_resumed and not (args.checkpoint_dir / "model_27m_best.pt").exists():
+        import shutil
+        shutil.copy2(ckpt_path, args.checkpoint_dir / "model_27m_best.pt")
+        logger.info(f"[*] Initialized starting {args.checkpoint_dir / 'model_27m_best.pt'} from baseline checkpoint.")
 
     # 9. Main Training Loop
     tokens_per_step = args.micro_batch_size * args.grad_accum * args.block_size
@@ -469,6 +599,8 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
     recent_tokens = 0
     step = start_step
     accum_loss = base_loss_A
+    skipped_updates = 0
+    successful_updates = 0
 
     while step < args.max_steps:
         # Check wall-clock budget
@@ -478,12 +610,11 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
             stop_reason = "time_limit"
             break
 
-        step += 1
         step_start_time = time.perf_counter()
 
         # Update Learning Rate along continuous 6000-step cosine schedule
         curr_lr = compute_learning_rate(
-            step, args.warmup_steps, args.total_scheduled_steps, args.peak_lr, args.min_lr
+            step + 1, args.warmup_steps, args.total_scheduled_steps, args.peak_lr, args.min_lr
         )
         for param_group in optimizer.param_groups:
             param_group["lr"] = curr_lr
@@ -505,7 +636,7 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
                 scaled_loss = loss / args.grad_accum
 
             if not torch.isfinite(loss):
-                logger.error(f"FATAL: Non-finite loss ({loss.item()}) at step {step}, micro {micro_idx}!")
+                logger.error(f"FATAL: Non-finite loss ({loss.item()}) at attempt for step {step + 1}, micro {micro_idx}!")
                 stop_reason = "loss_nan"
                 break
 
@@ -522,14 +653,17 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
 
         if not torch.isfinite(grad_norm):
-            logger.warning(f"Non-finite grad norm ({grad_norm.item()}) at step {step}, skipping optimizer update.")
+            logger.warning(f"Non-finite grad norm ({grad_norm.item()}) at attempt for step {step + 1}, skipping optimizer update.")
             optimizer.zero_grad(set_to_none=True)
             scaler.update()
+            skipped_updates += 1
             continue
 
         scaler.step(optimizer)
         scaler.update()
 
+        step += 1
+        successful_updates += 1
         run_tokens_processed += tokens_per_step
         recent_tokens += tokens_per_step
 
@@ -575,12 +709,15 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
                 "model_config": asdict(gpt_config),
                 "tokens_processed": tokens_processed_before + run_tokens_processed,
                 "run_tokens_processed": run_tokens_processed,
+                "dataset_content_fingerprint": current_dataset_fp,
+                "dataset_content_hashes": current_file_hashes,
                 "dataset_fingerprint": current_dataset_fp,
+                "legacy_dataset_metadata_fingerprint": current_legacy_metadata_fp,
                 "tokenizer_fingerprint": tok_fp,
                 "rng_states": {
-                    "torch": torch.get_rng_state(),
-                    "cuda": torch.cuda.get_rng_state() if torch.cuda.is_available() else None,
-                    "data_rng": data_rng.get_state(),
+                    "torch": torch.get_rng_state().cpu(),
+                    "cuda": torch.cuda.get_rng_state().cpu() if torch.cuda.is_available() else None,
+                    "data_rng": data_rng.get_state().cpu(),
                 },
                 "lr": curr_lr,
                 "train_loss": accum_loss,
@@ -643,12 +780,15 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
         "model_config": asdict(gpt_config),
         "tokens_processed": tokens_processed_before + run_tokens_processed,
         "run_tokens_processed": run_tokens_processed,
+        "dataset_content_fingerprint": current_dataset_fp,
+        "dataset_content_hashes": current_file_hashes,
         "dataset_fingerprint": current_dataset_fp,
+        "legacy_dataset_metadata_fingerprint": current_legacy_metadata_fp,
         "tokenizer_fingerprint": tok_fp,
         "rng_states": {
-            "torch": torch.get_rng_state(),
-            "cuda": torch.cuda.get_rng_state() if torch.cuda.is_available() else None,
-            "data_rng": data_rng.get_state(),
+            "torch": torch.get_rng_state().cpu(),
+            "cuda": torch.cuda.get_rng_state().cpu() if torch.cuda.is_available() else None,
+            "data_rng": data_rng.get_state().cpu(),
         },
         "lr": compute_learning_rate(step, args.warmup_steps, args.total_scheduled_steps, args.peak_lr, args.min_lr),
         "train_loss": accum_loss,
@@ -668,6 +808,9 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
     save_crash_safe_checkpoint(final_ckpt, args.checkpoint_dir / "model_27m_latest.pt")
     if is_final_best:
         save_crash_safe_checkpoint(final_ckpt, args.checkpoint_dir / "model_27m_best.pt")
+        logger.info(f"[*] NEW OVERALL BEST MODEL saved at termination (step {step}, loss: {best_val_loss:.4f})")
+    else:
+        logger.info(f"[*] Termination model (step {step}, loss: {final_loss_A:.4f}) did not beat previous best at step {best_step} (loss: {best_val_loss:.4f}). Previous best preserved.")
 
     # 11. Final Qualitative Inspection Samples
     print("\n[*] Generating qualitative inspection samples from final model...")
@@ -690,11 +833,15 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
         "new_steps": step - start_step,
         "run_tokens_processed": run_tokens_processed,
         "cumulative_tokens_processed": cumulative_tokens,
+        "skipped_optimizer_updates": skipped_updates,
+        "successful_optimizer_updates": successful_updates,
         "dataset_epochs": round(dataset_epochs, 4),
         "wall_time_seconds": round(total_training_wall_time, 2),
         "run_average_tokens_per_sec": round(run_avg_tok_sec, 1),
         "peak_vram_allocated_mb": round(peak_allocated_mb, 2),
         "peak_vram_reserved_mb": round(peak_reserved_mb, 2),
+        "dataset_content_fingerprint": current_dataset_fp,
+        "dataset_content_hashes": current_file_hashes,
         "baseline_val_metrics": {
             "step": eval_step_label,
             "track_A_combined_loss": base_loss_A,
