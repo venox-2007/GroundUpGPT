@@ -38,6 +38,7 @@ class GenerationConfig:
     top_p: Optional[float] = None
     seed: Optional[int] = None
     stop_sequences: Optional[List[str]] = None
+    repetition_penalty: Optional[float] = None
 
     def __post_init__(self) -> None:
         """Validate generation parameters."""
@@ -49,6 +50,10 @@ class GenerationConfig:
             raise ValueError(f"top_k must be positive, got {self.top_k}")
         if self.top_p is not None and (self.top_p <= 0.0 or self.top_p > 1.0):
             raise ValueError(f"top_p must be in range (0.0, 1.0], got {self.top_p}")
+        if self.repetition_penalty is not None and self.repetition_penalty <= 0.0:
+            raise ValueError(
+                f"repetition_penalty must be positive, got {self.repetition_penalty}"
+            )
 
 
 @dataclass
@@ -335,7 +340,18 @@ class TextGenerator:
 
                 # 2. Forward pass to obtain last-position logits
                 logits, _ = self.model(idx_cond)
-                next_logits = logits[0, -1, :]
+                next_logits = logits[0, -1, :].clone()
+
+                # Optional repetition penalty (Keskar et al., 2019)
+                if cfg.repetition_penalty is not None and cfg.repetition_penalty != 1.0:
+                    generated_so_far = curr_tokens[len(prompt_ids):]
+                    if generated_so_far:
+                        penalty = float(cfg.repetition_penalty)
+                        for tid in set(generated_so_far):
+                            if next_logits[tid] > 0:
+                                next_logits[tid] /= penalty
+                            else:
+                                next_logits[tid] *= penalty
 
                 # 3. Sample Next Token
                 next_token_id = sample_next_token(
@@ -389,8 +405,11 @@ class TextGenerator:
                             pending_buffer = ""
 
                         # If this is the last step without a stop sequence, flush remaining buffer
+                        # unless it is a partial stop sequence prefix (e.g. '<', '<|', '<|endoftext') truncated by max_new_tokens
                         if is_last_step:
-                            emit_chunk += pending_buffer
+                            is_stop_prefix = any(stop_seq.startswith(pending_buffer) for stop_seq in cfg.stop_sequences if pending_buffer)
+                            if not is_stop_prefix:
+                                emit_chunk += pending_buffer
                             pending_buffer = ""
                 else:
                     emit_chunk = pending_buffer
@@ -473,11 +492,17 @@ class TextGenerator:
         # Safely decode full generated text
         generated_text = "".join(streamed_chunks)
 
-        # Clean stop sequences from generated text if present
+        # Clean stop sequences and truncated delimiter prefixes from generated text if present
         if cfg.stop_sequences:
             for stop_seq in cfg.stop_sequences:
                 if stop_seq in generated_text:
                     generated_text = generated_text.split(stop_seq)[0]
+                # Strip partial special delimiter prefixes (e.g. truncated at max_new_tokens)
+                for k in range(len(stop_seq), 0, -1):
+                    prefix = stop_seq[:k]
+                    if prefix.startswith("<") and generated_text.endswith(prefix):
+                        generated_text = generated_text[:-k].rstrip()
+                        break
 
         full_text = prompt + generated_text
         tokens_per_second = len(generated_ids) / max(elapsed_time, 1e-9)
@@ -530,14 +555,21 @@ def generate_sft_response(
         top_p=cfg.top_p,
         seed=cfg.seed,
         stop_sequences=stop_seqs,
+        repetition_penalty=cfg.repetition_penalty,
     )
     result = generator.generate(prompt=formatted_prompt, config=sft_cfg)
 
-    # Clean any residual delimiter residues from the final response
+    # Clean any residual full or partial delimiter residues from the final response
     cleaned_text = result.generated_text.strip()
     for delim in ["<|endoftext|>", "<|user|>", "<|assistant|>"]:
         if cleaned_text.endswith(delim):
             cleaned_text = cleaned_text[: -len(delim)].strip()
+        # Clean partial delimiter prefixes truncated at sequence limits
+        for k in range(len(delim), 0, -1):
+            prefix = delim[:k]
+            if prefix.startswith("<") and cleaned_text.endswith(prefix):
+                cleaned_text = cleaned_text[:-k].strip()
+                break
 
     result.generated_text = cleaned_text
     result.prompt = prompt

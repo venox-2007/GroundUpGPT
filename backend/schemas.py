@@ -44,6 +44,12 @@ class GenerateRequest(BaseModel):
         default=None,
         description="Optional seed for deterministic pseudo-random sampling.",
     )
+    repetition_penalty: Optional[float] = Field(
+        default=None,
+        gt=0.0,
+        le=5.0,
+        description="Optional repetition penalty factor (>1.0 penalizes repeated tokens; None disables).",
+    )
 
 
 class GenerateResponse(BaseModel):

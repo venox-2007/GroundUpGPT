@@ -11,11 +11,12 @@ const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") || "http://localhost:8000";
 
 const DEFAULT_SETTINGS: GenerationSettings = {
-  temperature: 1.0,
+  temperature: 0.7,
   top_k: null,
   top_p: 0.9,
   max_new_tokens: 50,
   seed: null,
+  repetition_penalty: 1.15,
 };
 
 export default function ChatPage() {
@@ -114,6 +115,7 @@ export default function ChatPage() {
           top_k: settings.top_k,
           top_p: settings.top_p,
           seed: settings.seed,
+          repetition_penalty: settings.repetition_penalty ?? 1.0,
         }),
         signal: abortController.signal,
       });

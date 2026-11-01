@@ -441,6 +441,32 @@ export function Sidebar({
                   />
                 </div>
 
+                {/* Repetition Penalty */}
+                <div>
+                  <div className="flex justify-between text-slate-300">
+                    <span>Repetition Penalty</span>
+                    <span className="font-mono text-teal-400">
+                      {(settings.repetition_penalty ?? 1.0).toFixed(2)}
+                      {(settings.repetition_penalty ?? 1.0) === 1.0 ? " (Off)" : ""}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1.0"
+                    max="2.0"
+                    step="0.05"
+                    value={settings.repetition_penalty ?? 1.0}
+                    disabled={isGenerating}
+                    onChange={(e) =>
+                      onUpdateSettings({
+                        ...settings,
+                        repetition_penalty: parseFloat(e.target.value),
+                      })
+                    }
+                    className="mt-1 w-full accent-teal-500"
+                  />
+                </div>
+
                 {/* Optional Seed */}
                 <div>
                   <div className="flex justify-between text-slate-300">

@@ -81,6 +81,8 @@ if (-not $npmPath) {
 # Do not automatically retrain.
 $ckptPath = Join-Path $root 'checkpoints\demo_checkpoint.pt'
 $tokPath = Join-Path $root 'checkpoints\demo_tokenizer.json'
+$ckpt5mSftBest = Join-Path $root 'checkpoints\5m_sft\model_5m_sft_best.pt'
+$ckpt5mSftLatest = Join-Path $root 'checkpoints\5m_sft\model_5m_sft_latest.pt'
 $ckpt5mP2Best = Join-Path $root 'checkpoints\5m_phase2\model_5m_best.pt'
 $ckpt5mP2Latest = Join-Path $root 'checkpoints\5m_phase2\model_5m_latest.pt'
 $ckpt5mBest = Join-Path $root 'checkpoints\5m_continued\model_5m_best.pt'
@@ -91,11 +93,14 @@ $tok5mPath = Join-Path $root 'checkpoints\bpe_vocab4096.json'
 $hasCkpt = Test-Path $ckptPath
 $hasTok = Test-Path $tokPath
 $hasTok5m = Test-Path $tok5mPath
+$has5mSftBest = (Test-Path $ckpt5mSftBest) -and $hasTok5m
 $has5mP2Best = (Test-Path $ckpt5mP2Best) -and $hasTok5m
 $has5mBest = (Test-Path $ckpt5mBest) -and $hasTok5m
 $has5mStep200 = (Test-Path $ckpt5mStep200) -and $hasTok5m
 
-if ($has5mP2Best) {
+if ($has5mSftBest) {
+    Write-Host '[*] Verified SFT Best instruction-tuned 5.05M model checkpoint (Step 650) and tokenizer.' -ForegroundColor Green
+} elseif ($has5mP2Best) {
     Write-Host '[*] Verified Phase 2 Best trained 5.05M model checkpoint (Step 3000) and tokenizer.' -ForegroundColor Green
 } elseif ($has5mBest) {
     Write-Host '[*] Verified Best trained 5.05M model checkpoint (Step 1000) and tokenizer.' -ForegroundColor Green
@@ -213,8 +218,10 @@ if ($fConn) {
 if ($backendRunning -and $frontendRunning) {
     Write-Host ''
     Write-Host '[INFO] GroundUpGPT backend (port 8000) and frontend (port 3000) are already running and responsive!' -ForegroundColor Green
-    Write-Host 'Opening browser: http://localhost:3000' -ForegroundColor Cyan
-    Start-Process 'http://localhost:3000'
+    if ($script:isInteractive) {
+        Write-Host 'Opening browser: http://localhost:3000' -ForegroundColor Cyan
+        Start-Process 'http://localhost:3000'
+    }
     exit 0
 }
 
@@ -353,5 +360,7 @@ Write-Host 'Keep the Backend and Frontend terminal windows open while using the 
 Write-Host 'To safely stop all GroundUpGPT services, double-click "Stop GroundUpGPT.bat".' -ForegroundColor Gray
 Write-Host ''
 
-Start-Process 'http://localhost:3000'
+if ($script:isInteractive) {
+    Start-Process 'http://localhost:3000'
+}
 Start-Sleep -Seconds 3

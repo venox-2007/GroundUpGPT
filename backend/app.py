@@ -195,6 +195,7 @@ async def generate_text(request: GenerateRequest, raw_request: Request) -> Gener
         top_k=request.top_k,
         top_p=request.top_p,
         seed=request.seed,
+        repetition_penalty=request.repetition_penalty,
     )
 
     worker_result = {}
@@ -286,6 +287,7 @@ async def generate_text_stream(
         top_p=request.top_p,
         seed=request.seed,
         stop_sequences=stop_seqs,
+        repetition_penalty=request.repetition_penalty,
     )
 
     async def sse_event_stream() -> AsyncIterator[str]:

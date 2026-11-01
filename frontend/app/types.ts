@@ -79,4 +79,5 @@ export interface GenerationSettings {
   top_p: number | null;
   max_new_tokens: number;
   seed: number | null;
+  repetition_penalty?: number | null;
 }
