@@ -744,7 +744,9 @@ class SFTDataPipeline:
             json.dump(meta, f, indent=2)
 
         manifest = {
-            "dataset_name": "Databricks Dolly 15k (SFT Subset)",
+            "dataset_name": (manifest_metadata or {}).get(
+                "dataset_name", "Databricks Dolly 15k (SFT Subset)"
+            ),
             "license": "Creative Commons Attribution-ShareAlike 3.0 Unported (CC BY-SA 3.0)",
             "attribution": "Databricks Dolly 15k, (c) 2023 Databricks, Inc., licensed under CC BY-SA 3.0",
             "format": "user_prefix='<|user|>\\n', assistant_prefix='<|assistant|>\\n', end_of_turn='<|endoftext|>\\n'",

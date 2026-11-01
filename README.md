@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-CUDA%20Accelerated-EE4C2C.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Completed (Steps 1-35)](https://img.shields.io/badge/Status-Completed%20(Steps%201--35)-brightgreen.svg)]()
+[![Status: Completed (Steps 1-36)](https://img.shields.io/badge/Status-Completed%20(Steps%201--36)-brightgreen.svg)]()
 
 GroundUpGPT is an educational and engineering project dedicated to designing, implementing, training, evaluating, and deploying a small autoregressive, decoder-only Transformer language model completely from scratch using Python and PyTorch.
 
@@ -1203,6 +1203,96 @@ python scripts/train_27m_phase1.py --resume-from checkpoints/27m_phase3/model_27
 
 ---
 
+## Step 36 — Dedicated Conversation Data Preparation for GroundUpGPT-27M
+
+### 1. Investigation of Dataset Fingerprint Discrepancy
+
+A forensic investigation was conducted into the reported composite dataset hash discrepancy between Step 34 (`99afdab...`) and Step 35 (`b915a6a...`):
+
+- **Bit-Exact Content Verification**: Every file in `data/cache_27m_v1/` was audited with SHA-256:
+  - `train_tokens.pt`: `7ccf4275817cb01d957df60d3a801639571b48b667d4f9afbf08e92bd8e8cbc9`
+  - `val_tokens.pt`: `75c51850f7c8bdbad818a263c998c058010f5ee9fb923bd5b3aa1a81235e46e0`
+  - `cache_metadata.json`: `b59909e5d9ad6d0fc398fdd0e8d70226a5197c5c825611baad826a86c3ee250a`
+  - `corpus_manifest.json`: `e145bb0615d1a1b43e67cd3ead0f59690cc1ff9d9f55d4e396c17cdb6f54e97a`
+  - `source_provenance.json`: `a25b909c90a000aec08b64a13ed2943d1584a34b9d4078b7ef294dff8605235f`
+- **Root Cause Identified**:
+  - The underlying files are **100% bit-for-bit identical** across Steps 32, 33, 34, and 35. The dataset never changed.
+  - In `train_27m_phase1.py`, the official code implementation computes:
+    `composite.update(f"{filename}:{file_hashes[filename]}\n".encode())`
+    This yields `b915a6a8a01689472cf5b015f147f31b6e6530206edf380573e8797fbf3c8f93`, which is stored in all Step 34 and Step 35 checkpoints and telemetry logs.
+  - An early Step 34 manual verification script concatenated without trailing newlines:
+    `hashlib.sha256(''.join(f'{k}:{v}' for k, v in hashes.items()).encode()).hexdigest()`
+    which mathematically evaluates to `99afdab100d81871b4bbb1a6596aa0551ae567d5e1dbfeffcf560175c7eb07fb`.
+  - Conclusion: The discrepancy was purely a formatting artifact in the early Step 34 narrative text; all runtime checkpoints and underlying data tensors have always been authentic, untampered, and bit-identical.
+
+### 2. Source Checkpoint Integrity Audit (Step 5949)
+
+- Checkpoint: `checkpoints/27m_phase4/model_27m_best.pt`
+- Unique Model Parameters: **27,411,456**
+- Architecture: 8 Transformer layers, 8 heads, $d_{model} = 512$, context window 256 tokens.
+- Tokenizer Fingerprint: `4138461786ea6a199ff232b2427f3cb71c60f351afa7241f75f8196e51bdae72` (4,096 vocab).
+- Final Track A Validation Loss: **3.5768** (PPL: 35.76); Track B: 4.4824; Track C: 2.6171.
+- All weights are valid, finite floats without NaNs or infinities.
+
+### 3. SFT Dataset Provenance & Preparation Pipeline
+
+- **Source Dataset**: Databricks Dolly 15k (`data/raw_sft/databricks-dolly-15k.jsonl`, CC BY-SA 3.0, 15,011 records, SHA-256: `2df9083338b4abd6bceb5635764dab5d833b393b55759dffb0959b6fcbf794ec`).
+- **Formatting**: Canonical delimiters `<|user|>\n`, `<|assistant|>\n`, and `<|endoftext|>\n` (100% lossless BPE roundtrip).
+- **Sanitization & Scrubbing**:
+  - PII patterns (emails, phone numbers, IP addresses) scrubbed via regex.
+  - Accidental control delimiter injection in user content stripped.
+- **Strict Context Filtering (No Truncation)**: Examples exceeding 256 tokens are rejected to preserve complete human-written responses.
+- **Deduplication**: 11 exact full duplicates and 162 normalized prompt duplicates removed.
+- **Held-Out Conversational Benchmark Set**: 35 curated prompts across 8 task categories with evaluation criteria saved to `data/cache_sft_27m_v1/eval_benchmark_35.json`. 12 Dolly collisions were excluded from training to guarantee 100% zero leakage.
+- **Deterministic Split**: 90% train (8,433) / 10% validation (937), with zero prompt leakage.
+
+### 4. SFT Dataset Statistics (`data/cache_sft_27m_v1/`)
+
+| Metric | Measurement |
+| :--- | :--- |
+| **Total Usable Examples** | **9,370** (8,433 Train / 937 Validation) |
+| **Total Sequence Tokens** | **1,179,763** |
+| **Total Active Target Tokens** | **744,820** (63.13% active target fraction) |
+| **Total Prompt Tokens** | 425,573 |
+| **Prompt Length (Tokens)** | Min: 16, Max: 243, Mean: 45.4, Median: 32.0 |
+| **Response Length (Tokens)** | Min: 10, Max: 239, Mean: 79.5, Median: 66.0 |
+| **Sequence Length (Tokens)** | Min: 29, Max: 257, Mean: 125.9, Median: 118.0 |
+
+#### Category Breakdown
+
+| Category | Examples | Percentage |
+| :--- | :---: | :---: |
+| `open_qa` | 3,280 | 35.01% |
+| `classification` | 2,013 | 21.48% |
+| `general_qa` | 1,528 | 16.31% |
+| `brainstorming` | 1,514 | 16.16% |
+| `closed_qa` | 365 | 3.90% |
+| `creative_writing` | 356 | 3.80% |
+| `information_extraction` | 219 | 2.34% |
+| `summarization` | 95 | 1.01% |
+
+### 5. Step 37 SFT Engineering Recommendations
+
+1. **Target Architecture & Checkpoint**: GroundUpGPT-27M resumed from `checkpoints/27m_phase4/model_27m_best.pt` (Step 5949).
+2. **SFT Cache**: `data/cache_sft_27m_v1/` (9,370 examples, 744,820 active targets).
+3. **Hyperparameters**:
+   - Micro-batch size: $B = 8$ (or 16).
+   - Gradient accumulation steps: 4 (effective batch size 32 or 64).
+   - Learning rate: Conservative peak LR of $1.0 \times 10^{-4}$ to $1.5 \times 10^{-4}$ with linear warmup (50 steps) and cosine decay to $1.5 \times 10^{-5}$.
+   - Max steps: 500–800 steps (~1.5–2.5 epochs over active targets).
+4. **VRAM Estimation**: Peak memory $\sim 750\text{--}900$ MB with mixed-precision on RTX 3050 Laptop GPU (well within 6 GB budget).
+5. **Catastrophic Forgetting Safeguards**:
+   - Dual-track evaluation: monitor assistant-only SFT validation loss alongside frozen language modeling benchmark (`data/cache_27m_v1/val_tokens.pt`).
+   - Stop training if language modeling validation loss degrades by $> 15\%$.
+
+### 6. Reproduction Command
+
+```bash
+python scripts/prepare_sft_27m.py --raw-file data/raw_sft/databricks-dolly-15k.jsonl --cache-dir data/cache_sft_27m_v1 --tokenizer-path checkpoints/bpe_vocab4096.json
+```
+
+---
+
 ## Current Implementation Status
 
 - **Completed Steps**:
@@ -1241,4 +1331,5 @@ python scripts/train_27m_phase1.py --resume-from checkpoints/27m_phase3/model_27
   - **Step 33 — Safe Pretraining Resumption & 27M Continuation**: Diagnosed and resolved preflight smoke test isolation (preventing preflight parameter mutation), RNG state restoration on CPU ByteTensors, dedicated data generator passing, authentic dataset fingerprinting, and accurate per-run throughput calculation. Safely resumed and continued GroundUpGPT-27M from Step 1,200 to Step 2,400 (+1,200 steps; +9,830,400 tokens; 19.66M cumulative tokens exposed = 39.09% of 50.3M single-epoch budget) in 612.5s (10.21 min) at 16,049.2 tok/s on RTX 3050 Laptop GPU (1,375 MB peak VRAM). Multi-track validation: Track A (Combined) dropped from 4.5249 to **4.0030** (PPL: 92.3 -> **54.8**); Track B (Orig Gutenberg) dropped from 5.3575 to **4.8810** (PPL: 212.2 -> **131.8**); Track C (Wikipedia) dropped from 3.5620 to **3.0036** (PPL: 35.2 -> **20.2**). Saved continuation checkpoints in `checkpoints/27m_phase2/` and telemetry in `logs/training_27m_phase2.json`. Verified with 7/7 unit tests (`tests/test_27m_resumption.py`) and full repository suite (197/197 passing).
   - **Step 34 — Safe Continued Pretraining of GroundUpGPT-27M**: Eliminated fail-open checkpoint fallback (explicit resume required; corrupt/missing checkpoints fail immediately), introduced bounded streaming SHA-256 dataset content hashing (`train_tokens.pt`, `val_tokens.pt`, manifests), and tied optimizer step increments strictly to successful parameter updates. Continued pretraining from Step 2,400 to Step 3,968 (+1,568 new steps; +12,845,056 tokens; 32.51M cumulative tokens exposed = 64.62% of 50.3M corpus) in 900.4s (15.01 min) at 14,265.9 tok/s on RTX 3050 Laptop GPU (1,375 MB peak VRAM). Multi-track validation: Track A (Combined) dropped from 4.0030 to **3.7095** (PPL: 54.8 -> **40.8**); Track B (Orig Gutenberg) dropped from 4.8810 to **4.6069** (PPL: 131.8 -> **100.2**); Track C (Wikipedia) dropped from 3.0036 to **2.7236** (PPL: 20.2 -> **15.2**). Saved Phase 3 checkpoints in `checkpoints/27m_phase3/` (`model_27m_best.pt`, `model_27m_latest.pt`, `step_2600.pt`...`step_3800.pt`) and telemetry in `logs/training_27m_phase3.json`. Preserved `checkpoints/27m_phase2/` completely untouched. Verified with 11/11 unit tests (`tests/test_27m_resumption.py`) and full repository suite (201/201 passing).
   - **Step 35 — Continued 27M Pretraining & Language Generation Assessment**: Audited inference mechanics (confirming unspaced prompt token boundaries predict subword completions by mathematical design), implemented early-stopping patience checks, and continued pretraining from Step 3,968 to Step 5,949 (+1,981 new steps; +16,228,352 tokens; 48.73M cumulative tokens exposed = 96.88% of 50.3M corpus) in 900.2s (15.00 min) at 18,028 tok/s on RTX 3050 Laptop GPU (1,375 MB peak VRAM). Multi-track validation: Track A (Combined) dropped from 3.7095 to **3.5768** (PPL: 40.8 -> **35.8**); Track B (Orig Gutenberg) dropped from 4.6069 to **4.4824** (PPL: 100.2 -> **88.4**); Track C (Wikipedia) dropped from 2.7236 to **2.6171** (PPL: 15.2 -> **13.7**). Saved Phase 4 checkpoints in `checkpoints/27m_phase4/` (`model_27m_best.pt`, `model_27m_latest.pt`, `step_4000.pt`...`step_5800.pt`) and telemetry in `logs/training_27m_phase4.json`. Preserved Phase 1, 2, and 3 checkpoints completely untouched. Evaluated 16 held-out prompts across 6 domains: verified complete sentence generation (>80%), low sampling repetition (<1.5%), zero malformed words, but confirmed 0% factual recall due to parameter capacity constraints. Formulated evidence-based recommendation for Step 36 (curate compact $\le 256$ token conversational instruction dataset). Verified with 13/13 unit tests (`tests/test_27m_resumption.py`) and full repository suite (203/203 passing).
-- **Roadmap Complete**: Phase 10 (Steps 31–35) completed! All 35 steps complete.
+  - **Step 36 — Dedicated Conversation Data Preparation for 27M SFT**: Audited Step 5949 source checkpoint (27,411,456 params, 8L/8H/d=512/ctx=256, loss 3.5768) and resolved dataset fingerprint discrepancy (demonstrating exact file hash identity across all 5 cache files). Sourced Databricks Dolly 15k (CC BY-SA 3.0), implemented delimiter injection sanitization, PII scrubbing, exact and near deduplication, strict 256-token context window adherence without truncation, and assistant-only loss masking with `-100`. Created 35-prompt held-out conversational benchmark (`eval_benchmark_35.json`) across 8 categories with expected criteria, excluding 12 Dolly collisions for guaranteed zero leakage. Cached 9,370 usable examples (8,433 train, 937 val, 1,179,763 total tokens, 63.13% active target fraction) in `data/cache_sft_27m_v1/`. Verified end-to-end data pipeline reload, 100% token bounds in [0, 4095], and forward-only pass on 27M model (loss 4.2071, zero parameter mutation). Verified with 10/10 focused unit tests (`tests/test_27m_sft_data.py`) and full repository test suite (213/213 passing).
+- **Roadmap Complete**: Phase 10 (Steps 31–35) and Step 36 completed! All 36 steps complete.
