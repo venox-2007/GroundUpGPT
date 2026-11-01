@@ -9,6 +9,18 @@ from typing import Any, Dict, List, Optional
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 MODEL_PROFILES: Dict[str, Dict[str, Any]] = {
+    "27m_sft_best": {
+        "model_name": "GroundUpGPT-27M SFT Best (Experimental Chat)",
+        "checkpoint_path": str(REPO_ROOT / "checkpoints" / "27m_sft_phase1" / "model_27m_sft_best.pt"),
+        "tokenizer_path": str(REPO_ROOT / "checkpoints" / "bpe_vocab4096.json"),
+        "is_sft": True,
+    },
+    "27m_sft_latest": {
+        "model_name": "GroundUpGPT-27M SFT Latest (Experimental Chat)",
+        "checkpoint_path": str(REPO_ROOT / "checkpoints" / "27m_sft_phase1" / "model_27m_sft_latest.pt"),
+        "tokenizer_path": str(REPO_ROOT / "checkpoints" / "bpe_vocab4096.json"),
+        "is_sft": True,
+    },
     "5m_sft_best": {
         "model_name": "GroundUpGPT-5M SFT Best (Chat)",
         "checkpoint_path": str(REPO_ROOT / "checkpoints" / "5m_sft" / "model_5m_sft_best.pt"),
@@ -65,6 +77,8 @@ MODEL_PROFILES: Dict[str, Dict[str, Any]] = {
 
 
 CANONICAL_PROFILE_ORDER: List[str] = [
+    "27m_sft_best",
+    "27m_sft_latest",
     "5m_sft_best",
     "5m_sft_latest",
     "5m_phase2_best",

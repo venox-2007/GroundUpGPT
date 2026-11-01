@@ -93,6 +93,7 @@ class ModelInfoResponse(BaseModel):
     global_step: Optional[int] = None
     sft_step: Optional[int] = None
     source_step: Optional[int] = None
+    source_val_loss: Optional[float] = None
     is_sft: bool = False
     model_mode: str = "completion"
     sft_val_loss: Optional[float] = None

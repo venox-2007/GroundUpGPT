@@ -45,11 +45,19 @@ export function Sidebar({
       return false;
     }
     // Non-overlapping fallback only if active identity is absent:
+    const is27m = (modelInfo.total_parameters || 0) > 20000000;
+    const isLatest = !!modelInfo.profile_name && modelInfo.profile_name.toLowerCase().includes("latest");
+    if (key === "27m_sft_best") {
+      return modelInfo.is_sft === true && is27m && !isLatest;
+    }
+    if (key === "27m_sft_latest") {
+      return modelInfo.is_sft === true && is27m && isLatest;
+    }
     if (key === "5m_sft_best") {
-      return modelInfo.is_sft === true && (!modelInfo.profile_name || !modelInfo.profile_name.toLowerCase().includes("latest"));
+      return modelInfo.is_sft === true && !is27m && !isLatest;
     }
     if (key === "5m_sft_latest") {
-      return modelInfo.is_sft === true && !!modelInfo.profile_name && modelInfo.profile_name.toLowerCase().includes("latest");
+      return modelInfo.is_sft === true && !is27m && isLatest;
     }
     if (key === "5m_best") {
       return !modelInfo.is_sft && modelInfo.checkpoint_step === 1000 && (!modelInfo.profile_name || !modelInfo.profile_name.toLowerCase().includes("latest"));
@@ -73,8 +81,10 @@ export function Sidebar({
   };
 
   const getProfileButtonLabel = (key: string, name: string): string => {
-    if (key === "5m_sft_best") return "SFT Best (Chat)";
-    if (key === "5m_sft_latest") return "SFT Latest";
+    if (key === "27m_sft_best") return "27M SFT Best (Chat)";
+    if (key === "27m_sft_latest") return "27M SFT Latest";
+    if (key === "5m_sft_best") return "5M SFT Best (Chat)";
+    if (key === "5m_sft_latest") return "5M SFT Latest";
     if (key === "5m_phase2_best") return "Phase 2 Best";
     if (key === "5m_phase2_latest") return "Phase 2 (3K)";
     if (key === "5m_best") return "Step 1000";
@@ -247,6 +257,22 @@ export function Sidebar({
                 </div>
                 {modelInfo.is_sft ? (
                   <>
+                    {modelInfo.source_step !== undefined && modelInfo.source_step !== null && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Pretrain Step:</span>
+                        <span className="text-slate-300">
+                          #{modelInfo.source_step}
+                        </span>
+                      </div>
+                    )}
+                    {modelInfo.source_val_loss !== undefined && modelInfo.source_val_loss !== null && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Pretrain Loss:</span>
+                        <span className="text-slate-300">
+                          {modelInfo.source_val_loss.toFixed(4)}
+                        </span>
+                      </div>
+                    )}
                     {modelInfo.sft_step !== undefined && modelInfo.sft_step !== null && (
                       <div className="flex justify-between">
                         <span className="text-slate-500">SFT Step:</span>

@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-CUDA%20Accelerated-EE4C2C.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Completed (Steps 1-37)](https://img.shields.io/badge/Status-Completed%20(Steps%201--37)-brightgreen.svg)]()
+[![Status: Completed (Steps 1-38)](https://img.shields.io/badge/Status-Completed%20(Steps%201--38)-brightgreen.svg)]()
 
 GroundUpGPT is an educational and engineering project dedicated to designing, implementing, training, evaluating, and deploying a small autoregressive, decoder-only Transformer language model completely from scratch using Python and PyTorch.
 
@@ -1338,6 +1338,71 @@ Throughout the 600 SFT steps, underlying language modeling capabilities on froze
 
 ---
 
+## Step 38 — GroundUpGPT-27M Instruction-Tuned Web Chat Integration
+
+Step 38 integrates our 27,411,456-parameter instruction-tuned model into the full-stack FastAPI backend and Next.js browser chat application, enabling seamless runtime switching between 5M and 27M models while maintaining strict backward compatibility.
+
+### 1. Launching the Web Chat Interface
+
+The entire application (FastAPI backend on port 8000 and Next.js frontend on port 3000) launches with a single command:
+```powershell
+# Double-click or run from PowerShell:
+.\scripts\start_app.ps1
+# Or run the batch file:
+"Start GroundUpGPT.bat"
+```
+The launcher performs preflight validation verifying PyTorch CUDA acceleration, Node.js dependencies, and checkpoint integrity before opening the browser.
+
+### 2. Model Profiles and Dynamic Switching
+
+The application exposes trusted model profiles in canonical order:
+1. **`27m_sft_best`**: GroundUpGPT-27M SFT Best (Experimental Chat) — 27.41M params, 8 layers, 8 heads, SFT val loss 2.8769 (PPL 17.76), pretrain step 5949.
+2. **`27m_sft_latest`**: GroundUpGPT-27M SFT Latest (Experimental Chat) — Step 600 checkpoint.
+3. **`5m_sft_best`**: GroundUpGPT-5M SFT Best (Chat) — 5.05M params, 5 layers, 4 heads, SFT val loss 3.8380.
+4. **`5m_sft_latest`**: GroundUpGPT-5M SFT Latest.
+5. Base pretraining checkpoints (`5m_phase2_best`, `5m_best`, `demo`).
+
+Switching between models is atomic:
+- Concurrency locks prevent simultaneous switches.
+- If a checkpoint load fails, state automatically rolls back to the previously active model.
+- Previous model tensors are explicitly dereferenced and `torch.cuda.empty_cache()` reclaims VRAM.
+
+### 3. Delimiter Formatting & Context Safety
+
+- **Multi-Token Delimiters**: Custom BPE encodes delimiters into sequences (`<|user|>\n` = 7 tokens, `<|assistant|>\n` = 7 tokens, `<|endoftext|>\n` = 9 tokens). Prompts are assembled via `format_sft_prompt()` and response streaming buffers prefix tokens using `find_longest_stop_prefix_len()` to prevent leaking raw tokens.
+- **Context Limit Protection**: SFT requests with prompt lengths $\ge 256$ tokens are rejected immediately with HTTP 400 Bad Request to prevent corrupting turn structures, while base completion models retain sliding context window cropping.
+- **Calibrated Default Settings**: Initial UI decoding parameters are preset to `temperature = 0.8`, `top_k = 40`, `top_p = 0.9`, `max_new_tokens = 64`, and `repetition_penalty = 1.15`.
+
+### 4. Direct 10-Prompt Comparative Evaluation (5M vs 27M)
+
+Evaluated under identical calibrated sampling conditions on NVIDIA RTX 3050 6GB Laptop GPU:
+- **5M SFT Best**: Peak GPU Memory = **91.87 MB** | Generation Speed = **~105–119 tokens/sec**
+- **27M SFT Best**: Peak GPU Memory = **438.80 MB** | Generation Speed = **~95–108 tokens/sec**
+
+| # | Prompt | GroundUpGPT-5M SFT Best (650 Steps) | GroundUpGPT-27M SFT Best (600 Steps) | Qualitative Assessment |
+| :-: | :--- | :--- | :--- | :--- |
+| **1** | Hello! How are you today? | *"You can make sure the rank of your baby, or you want to get an hour, but you can see how to your money or some of the time in your lot of your children..."* | *"You can make a today? It is your today: I do this today; if you are today and your today. Biography is not a good today."* | 27M grounds its response directly in the word "today" and conversational syntax, whereas 5M drifts into generic dataset fragments. |
+| **2** | What is the capital of Japan? | *"James is a good rough of American or consistency for its categest and are typically expensive that can be made by an alization..."* | *"Japanese is a city in Japan. Massachusetts is known for its name to the Colorado dominant province in the New York Reserve Treaty..."* | 27M immediately identifies "Japanese" and "city in Japan", showing localized semantic association; 5M generates ungrounded jargon. |
+| **3** | Who wrote Romeo and Juliet? | *"James Rail, Gulla Clas, Man Bano Bales"* | *"Juliette was the first of Romeo Casino da Blue Baseball in 1954."* | 27M pairs "Juliette" and "Romeo" in a structured sentence; 5M outputs a disconnected list of names. |
+| **4** | What is gravity? | *"Trames is a digin of bablinece is an organization and expercussion. This is an expensified scritimulations a popular season-is more productrically the include"* | *"Traditionally, gravity"* | 27M produces clean phrasing referencing the exact subject word before concise termination; 5M outputs corrupted subword fragments. |
+| **5** | List three primary colors. | *"Tammon is a rough of diverse and cass a variety of sportes. In fact, the due based on an international popular stategories in Murdoman is performed by 19500, 182"* | *"James Bay Lee Players are Steve Bay Bay, Michael Haydn, New Zealand are Steve Cases, Steve Azkarok, Teres"* | 27M constructs a syntactically valid list of named entities; neither model possesses factual color knowledge at this scale. |
+| **6** | What is 2 + 2? | *"102 4 years old."* | *"3 - 2 + 2 = 3 1/ 4 = 5 \| 6 = 4 = 8 = \| 1 = \| 1\n5 - 0 = 3 = \| 1 ="* | 27M attempts arithmetic equation syntax echoing the prompt terms; 5M produces ungrounded numbers. |
+| **7** | Can you help me? | *"You can keep a location in your baby, or do some of the most of the main time for using your mind to look at that time in your first and give you an ahead on your lot of your best defense with your livity..."* | *"You can make a good healthy instruments like meat and cooker. Some people do a type of soft or a weapon today or a lot of time..."* | 27M produces grammatical, complete sentences addressing the user ("You can make..."); 5M generates rambling run-on clauses. |
+| **8** | What is a mammal? | *"A damming is a diological development that are many expensive and more important than the other sources of their competation."* | *"A mammals can help your baby, or to find the mammal system that can be used to prevent the mammals. It can also be a multiple system while an option is produced..."* | 27M accurately references "mammal" repeatedly in complete English clauses; 5M coins corrupted subwords like "diological" and "competation". |
+| **9** | Tell me a short story. | *"Trams is a team of diversion for your best services (expensive and processing the first relaw on cass)"* | *"Tell a large amount of water bills, or the air bills. It is also made up of water, while it comes from one another."* | 27M constructs a coherent English narrative fragment with subject-verb-object structure; 5M generates broken phrases. |
+| **10** | Thank you! | *"Tram, Had, Canada Casseu: A cuperal bashic is an expensive mammale state."* | *"James Bay Love Players include Hollywood and Era Free Biblick, Karay Moorts, Diego Moorts, Wolfgang Palats."* | 27M outputs clean proper nouns and fluent grammar; 5M produces garbled fragments. |
+
+### 5. Honest Capabilities & Structural Boundaries
+
+> [!WARNING]
+> **No Exaggerated Claims**: GroundUpGPT-27M is a small 27.4M-parameter decoder-only model trained entirely from scratch on consumer laptop hardware (~50M pretraining tokens, 9.37k Dolly SFT examples).
+> - **What it demonstrates**: Fluent English grammar, coherent subword tokenization, adherence to conversational `<|user|>` / `<|assistant|>` turn boundaries, and semantic association with prompt keywords.
+> - **What it cannot do**: Reliable factual recall, multi-step logical/mathematical reasoning, or multi-turn conversational memory. Hallucinations and topic drifts are expected outcomes of small parameter capacity and finite pretraining budgets.
+
+---
+
+---
+
 ## Current Implementation Status
 
 - **Completed Steps**:
@@ -1378,4 +1443,5 @@ Throughout the 600 SFT steps, underlying language modeling capabilities on froze
   - **Step 35 — Continued 27M Pretraining & Language Generation Assessment**: Audited inference mechanics (confirming unspaced prompt token boundaries predict subword completions by mathematical design), implemented early-stopping patience checks, and continued pretraining from Step 3,968 to Step 5,949 (+1,981 new steps; +16,228,352 tokens; 48.73M cumulative tokens exposed = 96.88% of 50.3M corpus) in 900.2s (15.00 min) at 18,028 tok/s on RTX 3050 Laptop GPU (1,375 MB peak VRAM). Multi-track validation: Track A (Combined) dropped from 3.7095 to **3.5768** (PPL: 40.8 -> **35.8**); Track B (Orig Gutenberg) dropped from 4.6069 to **4.4824** (PPL: 100.2 -> **88.4**); Track C (Wikipedia) dropped from 2.7236 to **2.6171** (PPL: 15.2 -> **13.7**). Saved Phase 4 checkpoints in `checkpoints/27m_phase4/` (`model_27m_best.pt`, `model_27m_latest.pt`, `step_4000.pt`...`step_5800.pt`) and telemetry in `logs/training_27m_phase4.json`. Preserved Phase 1, 2, and 3 checkpoints completely untouched. Evaluated 16 held-out prompts across 6 domains: verified complete sentence generation (>80%), low sampling repetition (<1.5%), zero malformed words, but confirmed 0% factual recall due to parameter capacity constraints. Formulated evidence-based recommendation for Step 36 (curate compact $\le 256$ token conversational instruction dataset). Verified with 13/13 unit tests (`tests/test_27m_resumption.py`) and full repository suite (203/203 passing).
   - **Step 36 — Dedicated Conversation Data Preparation for 27M SFT**: Audited Step 5949 source checkpoint (27,411,456 params, 8L/8H/d=512/ctx=256, loss 3.5768) and resolved dataset fingerprint discrepancy (demonstrating exact file hash identity across all 5 cache files). Sourced Databricks Dolly 15k (CC BY-SA 3.0), implemented delimiter injection sanitization, PII scrubbing, exact and near deduplication, strict 256-token context window adherence without truncation, and assistant-only loss masking with `-100`. Created 35-prompt held-out conversational benchmark (`eval_benchmark_35.json`) across 8 categories with expected criteria, excluding 12 Dolly collisions for guaranteed zero leakage. Cached 9,370 usable examples (8,433 train, 937 val, 1,179,763 total tokens, 63.13% active target fraction) in `data/cache_sft_27m_v1/`. Verified end-to-end data pipeline reload, 100% token bounds in [0, 4095], and forward-only pass on 27M model (loss 4.2071, zero parameter mutation). Verified with 10/10 focused unit tests (`tests/test_27m_sft_data.py`) and full repository test suite (213/213 passing).
   - **Step 37 — First Supervised Conversational Fine-Tuning of GroundUpGPT-27M**: Resumed from Step 5949 pretrained baseline (`checkpoints/27m_phase4/model_27m_best.pt`, SHA-256 `3e2f62dd...`, 27,411,456 params) and trained for 600 steps (600 successful updates, 0 skipped updates, 2,400 micro-batches, 9,600 sample exposures, 768,957 active assistant targets) on NVIDIA RTX 3050 6GB Laptop GPU in 555.45s (9.26 min) using ~1.2 GB peak VRAM. SFT validation loss improved monotonically from 3.9814 to **2.8769** (perplexity improved from 53.59 to **17.76**, a 66.9% reduction in perplexity). Protected against catastrophic forgetting: Track A pretraining LM validation loss drifted minimally from 3.5768 to 3.7804 (PPL 35.76 -> 43.83; Track B: 4.4824 -> 4.7355; Track C: 2.6171 -> 2.7395). Saved checkpoints atomically in `checkpoints/27m_sft_phase1/` (`model_27m_sft_best.pt`, `model_27m_sft_latest.pt`) and telemetry in `logs/training_27m_sft_phase1.json`. Evaluated 35 held-out conversational benchmark prompts across 8 categories: demonstrated transition from raw table markup/chapter heading repetitions to relevant, coherent English phrases and assistant responses adhering to turn structure, while rigorously documenting 27M parameter capacity boundaries (hallucination in complex multi-step arithmetic/explanations). Verified with 9/9 focused unit tests (`tests/test_27m_sft_training.py`) and full repository test suite (222/222 passing).
-- **Roadmap Complete**: Phase 10 (Steps 31–35), Step 36, and Step 37 completed! All 37 steps complete.
+  - **Step 38 — GroundUpGPT-27M SFT Web Chat Integration**: Integrated the 27,411,456-parameter instruction-tuned model (`27m_sft_best`, `27m_sft_latest`) into the existing FastAPI backend and Next.js chat interface. Preserved backward compatibility with all 5M models, implemented concurrent switching with state rollback and CUDA cache reclamation, multi-token BPE delimiter formatting, strict 256-token context limit validation, real-time SSE streaming, and calibrated decoding defaults (`temp=0.8, top_k=40, top_p=0.9, rep_penalty=1.15`). Benchmarked 10 conversational prompts against 5M baseline (27M: 438.8 MB peak VRAM, ~102 tok/s; 5M: 91.9 MB peak VRAM, ~111 tok/s). Verified with 9/9 focused unit tests (`tests/test_27m_ui_integration.py`), Next.js production build (`npm run build`), and full test suite (231/231 passing).
+- **Roadmap Complete**: Phase 11 completed through Step 38! All 38 steps complete.

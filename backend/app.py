@@ -189,6 +189,21 @@ async def generate_text(request: GenerateRequest, raw_request: Request) -> Gener
 
     is_sft = bool(model_manager.model_info and getattr(model_manager.model_info, "is_sft", False))
 
+    if is_sft:
+        from src.generation import format_sft_prompt
+        prompt_to_run = format_sft_prompt(request.prompt)
+    else:
+        prompt_to_run = request.prompt
+
+    prompt_ids = model_manager.generator.tokenizer.encode(prompt_to_run)
+    prompt_tokens_count = len(prompt_ids)
+    block_size = model_manager.model.config.block_size if model_manager.model else 256
+    if is_sft and prompt_tokens_count >= block_size:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Prompt length ({prompt_tokens_count} tokens including conversation delimiters) exceeds or equals the model's maximum context window of {block_size} tokens. Please shorten your message.",
+        )
+
     config = GenerationConfig(
         max_new_tokens=request.max_new_tokens,
         temperature=request.temperature,
@@ -280,6 +295,22 @@ async def generate_text_stream(
         prompt_to_run = request.prompt
         stop_seqs = None
 
+    try:
+        prompt_ids = model_manager.generator.tokenizer.encode(prompt_to_run)
+        prompt_tokens_count = len(prompt_ids)
+    except Exception as encode_err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to encode prompt: {encode_err}",
+        )
+
+    block_size = model_manager.model.config.block_size if model_manager.model else 256
+    if is_sft and prompt_tokens_count >= block_size:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Prompt length ({prompt_tokens_count} tokens including conversation delimiters) exceeds or equals the model's maximum context window of {block_size} tokens. Please shorten your message.",
+        )
+
     config = GenerationConfig(
         max_new_tokens=request.max_new_tokens,
         temperature=request.temperature,
@@ -291,15 +322,6 @@ async def generate_text_stream(
     )
 
     async def sse_event_stream() -> AsyncIterator[str]:
-        prompt_tokens_count = 0
-        try:
-            prompt_ids = model_manager.generator.tokenizer.encode(prompt_to_run)
-            prompt_tokens_count = len(prompt_ids)
-        except Exception as encode_err:
-            error_payload = json.dumps({"error": f"Failed to encode prompt: {encode_err}"})
-            yield f"event: error\ndata: {error_payload}\n\n"
-            return
-
         generated_tokens_count = 0
         start_time = time.perf_counter()
         sync_queue: queue.Queue = queue.Queue(maxsize=16)

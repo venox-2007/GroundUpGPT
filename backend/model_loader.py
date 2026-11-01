@@ -156,15 +156,21 @@ class ModelManager:
         model_mode = "chat" if is_sft else "completion"
 
         display_profile = model_name
+        num_params = model.get_num_params()
         if display_profile is None:
             if is_sft:
-                display_profile = f"GroundUpGPT-5M SFT (Step {sft_step})"
+                if num_params > 20_000_000:
+                    display_profile = f"GroundUpGPT-27M SFT (Step {sft_step})"
+                else:
+                    display_profile = f"GroundUpGPT-5M SFT (Step {sft_step})"
+            elif num_params > 20_000_000:
+                display_profile = "GroundUpGPT-27M"
             elif gpt_config.vocab_size == 4096 and gpt_config.num_layers == 5:
                 display_profile = "GroundUpGPT-5M (5.05M)"
             elif gpt_config.vocab_size <= 512 and gpt_config.num_layers <= 3:
                 display_profile = "GroundUpGPT-Demo (35K)"
             else:
-                display_profile = f"GroundUpGPT ({model.get_num_params():,} params)"
+                display_profile = f"GroundUpGPT ({num_params:,} params)"
 
         checkpoint_step = checkpoint.get("step")
         if checkpoint_step is None and is_sft:
@@ -180,28 +186,30 @@ class ModelManager:
             num_heads=gpt_config.num_heads,
             num_layers=gpt_config.num_layers,
             weight_tying=gpt_config.weight_tying,
-            total_parameters=model.get_num_params(),
+            total_parameters=num_params,
             tokenizer_type=saved_tok_type,
             tokenizer_vocab_size=tokenizer.vocab_size,
             tokenizer_fingerprint=curr_fp,
             device=target_device,
             checkpoint_step=checkpoint_step,
-            checkpoint_val_loss=checkpoint.get("val_loss") or checkpoint.get("sft_val_loss"),
+            checkpoint_val_loss=checkpoint.get("val_loss") or checkpoint.get("sft_val_loss") or checkpoint.get("best_sft_val_loss"),
             original_val_loss=checkpoint.get("original_val_loss"),
             expanded_val_loss=checkpoint.get("expanded_val_loss"),
             checkpoint_perplexity=checkpoint.get("perplexity") or checkpoint.get("expanded_perplexity") or checkpoint.get("sft_val_perplexity"),
             global_step=global_step,
             sft_step=sft_step,
             source_step=source_step,
+            source_val_loss=checkpoint.get("source_val_loss"),
             is_sft=is_sft,
             model_mode=model_mode,
-            sft_val_loss=checkpoint.get("sft_val_loss"),
-            sft_val_perplexity=checkpoint.get("sft_val_perplexity"),
+            sft_val_loss=checkpoint.get("sft_val_loss") or checkpoint.get("best_sft_val_loss"),
+            sft_val_perplexity=checkpoint.get("sft_val_perplexity") or checkpoint.get("best_sft_val_perplexity"),
             lm_val_loss=checkpoint.get("lm_benchmark_val_loss"),
             lm_val_perplexity=checkpoint.get("lm_benchmark_perplexity"),
         )
 
         # 8. Atomically assign loaded components only after all validations pass
+        old_model = self.model
         self.model = model
         self.tokenizer = tokenizer
         self.generator = generator
@@ -209,8 +217,14 @@ class ModelManager:
         self.active_profile_key = active_profile_key
         self.device_name = target_device
         self._is_loaded = True
+
+        # Release previous model memory
+        del old_model
+        if target_device == "cuda" or (torch.cuda.is_available() and self.device_name == "cuda"):
+            torch.cuda.empty_cache()
+
         logger.info(
-            f"Successfully initialized GroundUpGPT ({model.get_num_params():,} parameters) "
+            f"Successfully initialized GroundUpGPT ({num_params:,} parameters) "
             f"on {target_device}."
         )
 
@@ -220,8 +234,11 @@ class ModelManager:
         self.tokenizer = None
         self.generator = None
         self.model_info = None
+        self.active_profile_key = None
         self._is_loaded = False
         self.device_name = "cpu"
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 
 # Global singleton instance managing model memory

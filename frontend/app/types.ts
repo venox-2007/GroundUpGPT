@@ -43,6 +43,7 @@ export interface ModelInfo {
   global_step?: number | null;
   sft_step?: number | null;
   source_step?: number | null;
+  source_val_loss?: number | null;
   is_sft?: boolean;
   model_mode?: string;
   sft_val_loss?: number | null;

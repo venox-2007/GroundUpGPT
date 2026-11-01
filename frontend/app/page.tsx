@@ -11,10 +11,10 @@ const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") || "http://localhost:8000";
 
 const DEFAULT_SETTINGS: GenerationSettings = {
-  temperature: 0.7,
-  top_k: null,
+  temperature: 0.8,
+  top_k: 40,
   top_p: 0.9,
-  max_new_tokens: 50,
+  max_new_tokens: 64,
   seed: null,
   repetition_penalty: 1.15,
 };
@@ -234,9 +234,14 @@ export default function ChatPage() {
         const info = await res.json();
         setModelInfo(info);
         setActiveProfile(profile);
+      } else {
+        const errData = await res.json().catch(() => ({ detail: "Unknown server error" }));
+        console.error("Failed to switch model profile:", errData.detail);
+        alert(`Failed to load model profile '${profile}': ${errData.detail || res.statusText}`);
       }
     } catch (err) {
       console.error("Failed to switch model profile:", err);
+      alert(`Network error switching model profile: ${err}`);
     }
   };
 
@@ -279,7 +284,7 @@ export default function ChatPage() {
                   : "bg-teal-950 text-teal-400 border-teal-800"
               }`}>
                 {modelInfo?.is_sft
-                  ? `SFT #${modelInfo.sft_step ?? modelInfo.checkpoint_step} (Chat) • Active`
+                  ? `${(modelInfo.total_parameters || 0) > 20000000 ? "27M" : "5M"} SFT #${modelInfo.sft_step ?? modelInfo.checkpoint_step} (Chat) • Active`
                   : modelInfo?.checkpoint_step !== undefined && modelInfo.checkpoint_step !== null
                   ? `Step ${modelInfo.checkpoint_step} • Active`
                   : "Active"}

@@ -81,6 +81,8 @@ if (-not $npmPath) {
 # Do not automatically retrain.
 $ckptPath = Join-Path $root 'checkpoints\demo_checkpoint.pt'
 $tokPath = Join-Path $root 'checkpoints\demo_tokenizer.json'
+$ckpt27mSftBest = Join-Path $root 'checkpoints\27m_sft_phase1\model_27m_sft_best.pt'
+$ckpt27mSftLatest = Join-Path $root 'checkpoints\27m_sft_phase1\model_27m_sft_latest.pt'
 $ckpt5mSftBest = Join-Path $root 'checkpoints\5m_sft\model_5m_sft_best.pt'
 $ckpt5mSftLatest = Join-Path $root 'checkpoints\5m_sft\model_5m_sft_latest.pt'
 $ckpt5mP2Best = Join-Path $root 'checkpoints\5m_phase2\model_5m_best.pt'
@@ -93,11 +95,15 @@ $tok5mPath = Join-Path $root 'checkpoints\bpe_vocab4096.json'
 $hasCkpt = Test-Path $ckptPath
 $hasTok = Test-Path $tokPath
 $hasTok5m = Test-Path $tok5mPath
+$has27mSftBest = (Test-Path $ckpt27mSftBest) -and $hasTok5m
 $has5mSftBest = (Test-Path $ckpt5mSftBest) -and $hasTok5m
 $has5mP2Best = (Test-Path $ckpt5mP2Best) -and $hasTok5m
 $has5mBest = (Test-Path $ckpt5mBest) -and $hasTok5m
 $has5mStep200 = (Test-Path $ckpt5mStep200) -and $hasTok5m
 
+if ($has27mSftBest) {
+    Write-Host '[*] Verified GroundUpGPT-27M SFT Best experimental chat checkpoint (Step 600) and tokenizer.' -ForegroundColor Green
+}
 if ($has5mSftBest) {
     Write-Host '[*] Verified SFT Best instruction-tuned 5.05M model checkpoint (Step 650) and tokenizer.' -ForegroundColor Green
 } elseif ($has5mP2Best) {
