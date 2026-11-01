@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-CUDA%20Accelerated-EE4C2C.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Completed (Steps 1-28)](https://img.shields.io/badge/Status-Completed%20(Steps%201--28)-brightgreen.svg)]()
+[![Status: Completed (Steps 1-31)](https://img.shields.io/badge/Status-Completed%20(Steps%201--31)-brightgreen.svg)]()
 
 GroundUpGPT is an educational and engineering project dedicated to designing, implementing, training, evaluating, and deploying a small autoregressive, decoder-only Transformer language model completely from scratch using Python and PyTorch.
 
@@ -830,6 +830,62 @@ python scripts/benchmark_27m_feasibility.py --device cuda
 
 ---
 
+## Expanded Pretraining Corpus for GroundUpGPT-27M (Step 31)
+
+To prepare for pretraining the scaled 27,411,456-parameter model (Step 30), Step 31 constructs a substantially larger, diverse, and legally compliant English pretraining corpus.
+
+### 1. Corpus Sourcing, Provenance & Licensing
+
+The pretraining corpus fuses two clean, trustworthy sources:
+
+| Source | Category | License | Snapshot / URL | Raw Size | Clean Train Tokens | Clean Val Tokens | Composition % |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Project Gutenberg** | Classic Literature, Philosophy, Science, History | Public Domain (US) | 62 curated works via [gutenberg.org](https://www.gutenberg.org/) | 49.37 MB | 13,871,198 | 1,118,258 | 27.58% |
+| **Simple English Wikipedia** | Modern Factual Expository Encyclopedia | CC BY-SA 4.0 / GFDL | Snapshot `20231101.simple` via Wikimedia Foundation | 149.6 MB | 36,430,248 | 1,564,237 | 72.42% |
+| **Total Fused Corpus** | Multi-Domain Pretraining | Verified Permissive | Fused in `data/cache_27m_v1/` | 198.97 MB | **50,301,446** | **2,682,495** | **100.0%** |
+
+- **Strict Robot-Access Compliance**: No web-scraping of human-facing websites. Downloaded via official Wikimedia Foundation dataset snapshots and polite Gutenberg mirrors.
+- **Strict Separation of SFT**: The instruction-tuning dataset (Databricks Dolly 15k from Step 26) is strictly excluded from pretraining data to preserve clean experimental evaluation.
+
+### 2. Preprocessing, Cleaning & Deduplication
+
+- **Encyclopedic Normalization**: Stripped wikitext templates, raw HTML elements, reference lists (`== References ==`, `== Other websites ==`, `== Related pages ==`), external link footers, and category tags.
+- **Quality Filtering**: Discarded disambiguation pages (`may mean:`, `might mean:`, `(disambiguation)`) and stubs (< 200 characters of cleaned body text).
+- **Exact Deduplication**: Document-level SHA-256 deduplication across 54,584 total documents.
+- **Strict Leakage Prevention**: Indexed 829,030 10-word validation shingles from all 8 held-out validation books:
+  - Original validation books: *The Time Machine* (`pg35`), *The War of the Worlds* (`pg36`), *Metamorphosis* (`pg5200`).
+  - Expanded validation books: *The Republic* (`pg1497`), *Origin of Species* (`pg1228`), *Wuthering Heights* (`pg768`), *Return of Sherlock Holmes* (`pg108`), *Huckleberry Finn* (`pg205`).
+  - Automatically detected and excluded 19 overlapping encyclopedia articles quoting passages from held-out texts (e.g. articles on Darwin, natural selection, and spacetime).
+- **Deterministic Validation Split**: 4% held-out validation based on `sha256(doc_id) % 100 < 4`, ensuring zero document leakage across train and validation splits.
+
+### 3. Tokenizer Invariant & Parallel Processing
+
+- **Exact Tokenizer Invariant**: Reused the exact 4,096-vocabulary byte-level BPE tokenizer (`checkpoints/bpe_vocab4096.json`, fingerprint: `4138461786ea6a199ff232b2427f3cb71c60f351afa7241f75f8196e51bdae72`).
+- **Parallel BPE Throughput**: Multi-process worker pool (12 CPU cores) encoding documents at **56,575.9 tokens/sec** (total wall time: 11.6 minutes).
+- **Versioned Pretraining Cache**: Saved in `data/cache_27m_v1/`:
+  - `train_tokens.pt`: 1D `torch.int32` tensor (50,301,446 tokens, 191.89 MB).
+  - `val_tokens.pt`: 1D `torch.int32` tensor (2,682,495 tokens, 10.23 MB).
+  - `cache_metadata.json`: Dataset statistics, fingerprint, and composition percentages.
+  - `corpus_manifest.json`: Document-level manifests and sample entries.
+  - `source_provenance.json`: Legal attribution, URLs, licenses, and transformation notices.
+  - `preprocessing_summary.json`: Filtering statistics, leak prevention audit, and timings.
+
+### 4. Training Readiness & Scaling Assessment
+
+- **Tokens-per-Parameter**: 50,301,446 unique training tokens / 27,411,456 parameters = **1.835 tokens per parameter** (up from 0.51 in Step 30, a **3.63x expansion**).
+- **Scaling Heuristics Discussion**:
+  - While Chinchilla scaling (Hoffmann et al., 2022) recommends ~20 tokens/parameter for compute-optimal training to loss plateau (~548M tokens for 27M), educational models on workstation hardware (RTX 3050 6GB) achieve strong language modeling capabilities with 1–3 epochs over a 50M+ high-quality diverse corpus (50M–150M total token exposures) without memorization.
+  - The combination of 27.58% rich 19th-century literature and 72.42% modern factual expository encyclopedia prose dramatically expands syntactic variety and modern world knowledge.
+- **Step 32 Integration**: Seamlessly loaded via `load_token_cache("data/cache_27m_v1", tokenizer=tokenizer)` yielding instant causal batch generation via `PretokenizedDataPipeline`.
+
+### 5. Reproducible Preparation Command
+
+```bash
+python scripts/prepare_27m_corpus.py --num-row-groups 72 --workers 12 --output-dir data/cache_27m_v1
+```
+
+---
+
 ## Current Implementation Status
 
 - **Completed Steps**:
@@ -863,4 +919,5 @@ python scripts/benchmark_27m_feasibility.py --device cuda
   - **Step 28 — Instruction-Tuned Web Chat Integration**: Integrated SFT checkpoint loading (`bpe` and `BPETokenizer` compatibility), dynamic default profile preference (`5m_sft_best`), conversational prompt formatting, streaming delimiter prefix buffering (`find_longest_stop_prefix_len`), exact token-weighted gradient accumulation, and responsive Next.js chat interface with mode badges, telemetry, dynamic placeholder, and Dolly 15k attribution. Verified with 9/9 focused integration tests (`tests/test_sft_ui_integration.py`), `npm run build`, and full test suite (161/161 passing).
   - **Step 29 — Real Conversational Quality Benchmark & Inference Audit**: Executed 31-prompt benchmark across 7 categories comparing Step 3000 Pretrained Base vs Step 650 SFT across Greedy, Default Sampling, and Calibrated SFT. Audited token alignment (100% match), fixed truncated delimiter leakage, added repetition penalty (1.15) to eliminate degenerate greedy repetitions, and documented capacity limitations and Step 30 roadmap. Verified with 6/6 unit tests (`tests/test_inference_audit.py`), `npm run build`, and full repository test suite (167/167 passing).
   - **Step 30 — Scaled Architecture & GPU Feasibility Benchmark**: Engineered and experimentally validated GroundUpGPT-27M (27,411,456 parameters, 8 layers, 8 heads, $d_{model}=512$, context 256). Implemented optional PyTorch SDPA attention path (1.23x throughput boost, saving 451 MB VRAM over manual attention at batch 16). Completed 20-step smoke test on 13.87M corpus in 9.53s (loss 8.4100 -> 7.3484, 17,199 tok/s, peak VRAM 1,266 MB allocated / 1,378 MB reserved, 4.76 GB headroom). Documented training data sufficiency deficit (0.51 tokens/param) and established Step 31 data diversification strategy. Verified with 9/9 unit tests (`tests/test_scaled_architecture.py`) and full repository test suite (176/176 passing).
-- **Roadmap Complete**: Phase 9 (Step 30) completed! All 30 steps complete.
+  - **Step 31 — Expanded, Diverse Pretraining Corpus for GroundUpGPT-27M**: Curated and tokenized a multi-domain pretraining corpus combining Project Gutenberg classic literature/philosophy (13.87M train tokens, 1.12M val tokens) with Simple English Wikipedia modern factual expository articles (CC BY-SA 4.0 / GFDL, 52,346 train docs, 36.43M train tokens) yielding **50,301,446 unique training tokens** and **2,682,495 held-out validation tokens** (52,983,941 total unique tokens across 54,584 clean documents). Reused exact 4,096-token BPE tokenizer (fingerprint: `4138461786ea6a199ff232b2427f3cb71c60f351afa7241f75f8196e51bdae72`). Enforced strict zero-leakage guarantee with 10-word shingle index across all 8 forbidden validation books, excluding 19 overlapping articles. Saved versioned pretraining cache in `data/cache_27m_v1/`. Verified with 6/6 unit tests (`tests/test_27m_corpus.py`).
+- **Roadmap Complete**: Phase 10 (Step 31) completed! All 31 steps complete.
