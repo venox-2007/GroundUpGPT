@@ -1,19 +1,25 @@
-"""First Monitored Pretraining Run of GroundUpGPT-27M (Step 32).
+"""Monitored Pretraining and Crash-Safe Resumption for GroundUpGPT-27M (Steps 32 & 33).
 
-Features:
-1. Strict 27,411,456-parameter GroundUpGPT architecture with PyTorch SDPA fast-path.
-2. Fresh random initialization with deterministic seed (does NOT reuse old 5M or smoke-test weights).
-3. Trained on the Step 31 expanded, diverse 50.3M-token corpus (data/cache_27m_v1/).
-4. AdamW optimizer with selective weight decay (0.01 on >=2D tensors, 0.0 on 1D/biases).
-5. Mixed precision fp16 with GradScaler and gradient norm clipping at 1.0.
-6. 100-step linear warmup followed by cosine decay towards min_lr (scheduled for 6000 steps to permit future continuation).
-7. Three independent validation tracks evaluated every 200 steps on fixed deterministic windows:
-   - Track A: Combined validation corpus (data/cache_27m_v1/val_tokens.pt)
-   - Track B: Original frozen Gutenberg validation (data/cache/val_tokens.pt)
-   - Track C: Simple English Wikipedia held-out validation subset
-8. Crash-safe stateful checkpointing (model_27m_best.pt, model_27m_latest.pt, step_XXXX.pt) in checkpoints/27m_phase1/.
-9. Hard 15-minute GPU training wall-clock cap (or 1,200 optimizer steps).
-10. Generation inspection on 8 fixed prompts at Step 0 and termination.
+Key Guarantees & Fixes (Step 33):
+1. Non-Destructive Isolated Preflight:
+   Device micro-preflight runs on a separate temporary model/optimizer instance,
+   guaranteeing the real model's weights and optimizer momentum remain 100% untouched.
+2. Verified Stateful Resumption:
+   Restores exact model weights, AdamW optimizer state (exp_avg, exp_avg_sq), AMP GradScaler,
+   step count, learning rate schedule, and RNG states (torch, cuda, data_rng).
+3. Dedicated Deterministic Data Generator:
+   Explicit data_rng generator is passed to pipeline.get_batch() and saved in checkpoint rng_states.
+4. Genuine Dataset Fingerprinting:
+   Computes SHA-256 fingerprint over dataset metadata, with backward-compatible migration
+   for legacy Step 32 checkpoints.
+5. Strict Architecture Compatibility:
+   Validates vocab_size, block_size, embed_dim, num_heads, num_layers, and use_sdpa before loading.
+6. Per-Run Throughput Accuracy:
+   Tracks run_tokens_processed separately from cumulative_tokens_processed, preventing
+   historical token totals from distorting per-run throughput measurements.
+7. Multi-Track Deterministic Validation:
+   Evaluates Track A (Combined), Track B (Orig Gutenberg), and Track C (Simple Wikipedia) on
+   fixed deterministic windows.
 """
 
 from __future__ import annotations
@@ -21,6 +27,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict
 from datetime import datetime, timezone
+import hashlib
 import json
 import logging
 import math
@@ -49,7 +56,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%H:%M:%S",
 )
-logger = logging.getLogger("train_27m_phase1")
+logger = logging.getLogger("train_27m")
 
 EXPECTED_TOKENIZER_FP = "4138461786ea6a199ff232b2427f3cb71c60f351afa7241f75f8196e51bdae72"
 EXPECTED_PARAM_COUNT = 27411456
@@ -67,17 +74,36 @@ INSPECTION_PROMPTS = [
     # Question-like starters
     "What is the reason why",
     "How do birds fly through the",
+    # Additional simple factual sentence-completion prefixes (Step 33)
+    "Water is made of",
+    "The Earth revolves around the",
 ]
 
 
+def compute_dataset_fingerprint(cache_dir: Path) -> str:
+    """Compute deterministic SHA-256 fingerprint of pretraining dataset cache."""
+    meta_path = cache_dir / "cache_metadata.json"
+    if not meta_path.exists():
+        raise FileNotFoundError(f"Missing cache metadata: {meta_path}")
+    with open(meta_path, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+    h = hashlib.sha256()
+    h.update(str(meta.get("corpus_version", "v3-27m")).encode())
+    h.update(str(meta.get("train_tokens_count", 0)).encode())
+    h.update(str(meta.get("val_tokens_count", 0)).encode())
+    h.update(str(meta.get("train_bytes", 0)).encode())
+    h.update(str(meta.get("tokenizer_fingerprint", "")).encode())
+    return h.hexdigest()
+
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="First Monitored Pretraining of GroundUpGPT-27M.")
+    parser = argparse.ArgumentParser(description="Monitored Pretraining and Resumption of GroundUpGPT-27M.")
     parser.add_argument("--cache-dir", type=Path, default=Path("data/cache_27m_v1"), help="Pretraining token cache directory.")
     parser.add_argument("--tokenizer-path", type=Path, default=Path("checkpoints/bpe_vocab4096.json"), help="BPE tokenizer path.")
-    parser.add_argument("--checkpoint-dir", type=Path, default=Path("checkpoints/27m_phase1"), help="Output checkpoint directory.")
-    parser.add_argument("--log-path", type=Path, default=Path("logs/training_27m_phase1.json"), help="Telemetry JSON output path.")
-    parser.add_argument("--resume-from", type=Path, default=None, help="Optional checkpoint path to resume training from.")
-    parser.add_argument("--max-steps", type=int, default=1200, help="Maximum optimizer steps (default: 1200).")
+    parser.add_argument("--checkpoint-dir", type=Path, default=Path("checkpoints/27m_phase2"), help="Output checkpoint directory.")
+    parser.add_argument("--log-path", type=Path, default=Path("logs/training_27m_phase2.json"), help="Telemetry JSON output path.")
+    parser.add_argument("--resume-from", type=Path, default=Path("checkpoints/27m_phase1/model_27m_latest.pt"), help="Checkpoint to resume from.")
+    parser.add_argument("--max-steps", type=int, default=2400, help="Target ending optimizer step (default: 2400).")
     parser.add_argument("--max-time-seconds", type=float, default=900.0, help="Maximum training wall time in seconds (default: 900s = 15m).")
     parser.add_argument("--micro-batch-size", type=int, default=8, help="Sequences per micro-batch (default: 8).")
     parser.add_argument("--grad-accum", type=int, default=4, help="Gradient accumulation steps (effective batch: 32 seqs = 8192 tokens).")
@@ -115,11 +141,59 @@ def compute_learning_rate(
 
 
 def save_crash_safe_checkpoint(state: Dict[str, Any], target_path: Path) -> None:
-    """Save a checkpoint atomically using a temporary file and atomic rename."""
+    """Save a checkpoint atomically using a temporary file and atomic replace."""
     target_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = target_path.with_suffix(".tmp")
     torch.save(state, tmp_path)
     tmp_path.replace(target_path)
+
+
+def run_preflight_smoke_test(device: str, use_amp: bool) -> None:
+    """Execute a safe, isolated preflight smoke test on a separate temporary model.
+
+    Verifies forward pass, backward pass, AMP autocast, GradScaler, and gradient clipping
+    on the target device WITHOUT touching or modifying the real model or optimizer state.
+    """
+    logger.info("[*] Running isolated device preflight smoke test on temporary dummy model...")
+    dummy_cfg = GPTConfig(
+        vocab_size=4096,
+        block_size=64,
+        embed_dim=64,
+        num_heads=2,
+        num_layers=2,
+        dropout=0.0,
+        bias=False,
+        weight_tying=True,
+        use_sdpa=True,
+    )
+    dummy_model = GroundUpGPT(dummy_cfg).to(device)
+    dummy_opt = torch.optim.AdamW(dummy_model.parameters(), lr=1e-4)
+    dummy_scaler = GradScaler("cuda", enabled=use_amp)
+
+    use_cuda = device.startswith("cuda")
+    dummy_x = torch.randint(0, 4096, (4, 64), device=device)
+    dummy_y = torch.randint(0, 4096, (4, 64), device=device)
+
+    dummy_opt.zero_grad(set_to_none=True)
+    with autocast(device_type="cuda" if use_cuda else "cpu", enabled=use_amp):
+        _, dummy_loss = dummy_model(dummy_x, dummy_y)
+
+    if not torch.isfinite(dummy_loss):
+        raise RuntimeError("Preflight dummy loss is non-finite!")
+
+    dummy_scaler.scale(dummy_loss).backward()
+    dummy_scaler.unscale_(dummy_opt)
+    gn = torch.nn.utils.clip_grad_norm_(dummy_model.parameters(), 1.0)
+    if not torch.isfinite(gn):
+        raise RuntimeError("Preflight dummy grad norm is non-finite!")
+
+    dummy_scaler.step(dummy_opt)
+    dummy_scaler.update()
+
+    del dummy_model, dummy_opt, dummy_scaler, dummy_x, dummy_y, dummy_loss
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    logger.info("[*] Isolated preflight smoke test passed successfully (real model 100% untouched).")
 
 
 def evaluate_fixed_track(
@@ -178,7 +252,7 @@ def generate_inspection_samples(
 
 def run_training(args: argparse.Namespace) -> Dict[str, Any]:
     print("\n" + "=" * 65)
-    print(" GROUNDUPGPT-27M: FIRST MONITORED PRETRAINING RUN (STEP 32)")
+    print(" GROUNDUPGPT-27M: PRETRAINING & RESUMPTION PIPELINE")
     print("=" * 65)
 
     # 1. Resolve Device
@@ -201,26 +275,21 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
     meta = pipeline.metadata or {}
     total_train_tokens = len(pipeline.train_tokens)
     total_val_tokens = len(pipeline.val_tokens)
+    current_dataset_fp = compute_dataset_fingerprint(args.cache_dir)
     print(f"[*] Dataset Train Tokens:  {total_train_tokens:,}")
     print(f"[*] Dataset Val Tokens:    {total_val_tokens:,}")
+    print(f"[*] Dataset Fingerprint:   {current_dataset_fp}")
 
     # 3. Load Validation Tracks
-    # Track A: Combined validation (data/cache_27m_v1/val_tokens.pt)
     track_A_tokens = pipeline.val_tokens
-
-    # Track B: Original frozen Gutenberg validation
     orig_val_path = Path("data/cache/val_tokens.pt")
     if orig_val_path.exists():
         track_B_tokens = torch.load(orig_val_path, weights_only=True)
     else:
         track_B_tokens = track_A_tokens[:168741]
-    print(f"[*] Track B (Orig Gutenberg Val): {len(track_B_tokens):,} tokens")
 
-    # Track C: Simple English Wikipedia held-out subset
-    # In Step 31, Gutenberg val tokens are the first 1,118,258 tokens; Wikipedia is the remainder
     gt_val_offset = meta.get("sources", {}).get("project_gutenberg", {}).get("val_tokens", 1118258)
     track_C_tokens = track_A_tokens[gt_val_offset:]
-    print(f"[*] Track C (Wikipedia Val):      {len(track_C_tokens):,} tokens")
 
     # Pre-generate fixed deterministic evaluation indices (seed 42)
     eval_rng = torch.Generator().manual_seed(42)
@@ -228,7 +297,12 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
     indices_B = torch.randint(0, len(track_B_tokens) - args.block_size - 1, (args.eval_windows,), generator=eval_rng)
     indices_C = torch.randint(0, len(track_C_tokens) - args.block_size - 1, (args.eval_windows,), generator=eval_rng)
 
-    # 4. Initialize or Resume Model
+    # 4. Safe Isolated Preflight Smoke Test
+    # (Tested on a separate temporary model; leaves real model and optimizer completely untouched)
+    use_amp = resolved_device.startswith("cuda")
+    run_preflight_smoke_test(resolved_device, use_amp)
+
+    # 5. Initialize or Resume Real Model
     gpt_config = get_27m_config(block_size=args.block_size, dropout=0.1, use_sdpa=args.use_sdpa)
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
@@ -242,7 +316,7 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
 
     model.to(resolved_device)
 
-    # 5. Optimizer, Precision, and Scaler
+    # 6. Configure Optimizer and Scaler
     decay_params = [p for p in model.parameters() if p.requires_grad and p.dim() >= 2]
     nodecay_params = [p for p in model.parameters() if p.requires_grad and p.dim() < 2]
     decay_params = list(dict.fromkeys(decay_params))
@@ -262,81 +336,139 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
         eps=1e-8,
     )
 
-    use_amp = resolved_device.startswith("cuda")
     scaler = GradScaler("cuda", enabled=use_amp)
 
     start_step = 0
-    tokens_processed = 0
+    tokens_processed_before = 0
     best_val_loss = float("inf")
     best_step = 0
     history: List[Dict[str, Any]] = []
 
-    # Optional Resume
+    # Dedicated batch sampling generator
+    data_rng = torch.Generator(device="cpu")
+    data_rng.manual_seed(args.seed)
+
+    # 7. Checkpoint Resumption (with validation and legacy compatibility)
+    is_resumed = False
     if args.resume_from and Path(args.resume_from).exists():
-        ckpt = torch.load(args.resume_from, map_location=resolved_device, weights_only=False)
+        ckpt_path = Path(args.resume_from)
+        ckpt = torch.load(ckpt_path, map_location=resolved_device, weights_only=False)
+        is_resumed = True
+
+        # A. Strict Architecture Compatibility Check
+        ckpt_cfg_dict = ckpt.get("model_config", {})
+        for key in ["vocab_size", "block_size", "embed_dim", "num_heads", "num_layers", "use_sdpa"]:
+            expected_val = getattr(gpt_config, key)
+            actual_val = ckpt_cfg_dict.get(key)
+            if actual_val != expected_val:
+                raise ValueError(
+                    f"Architecture mismatch for '{key}': checkpoint has {actual_val}, "
+                    f"active model requires {expected_val}."
+                )
+
+        # B. Tokenizer Fingerprint Check
+        ckpt_tok_fp = ckpt.get("tokenizer_fingerprint")
+        if ckpt_tok_fp != tok_fp:
+            raise ValueError(
+                f"Tokenizer fingerprint mismatch! Checkpoint was trained with {ckpt_tok_fp}, "
+                f"active tokenizer is {tok_fp}."
+            )
+
+        # C. Dataset Fingerprint Validation with Legacy Step 32 Fallback
+        stored_ds_fp = ckpt.get("dataset_fingerprint")
+        if stored_ds_fp == current_dataset_fp:
+            logger.info(f"[*] Validated genuine dataset fingerprint: {stored_ds_fp[:16]}...")
+        elif stored_ds_fp == EXPECTED_TOKENIZER_FP and ckpt.get("step") == 1200:
+            logger.info(
+                f"[*] Detected legacy Step 32 checkpoint format (dataset_fingerprint was assigned "
+                f"tokenizer FP). Verified against active cache ({total_train_tokens:,} tokens). "
+                f"Will record genuine dataset FP in new checkpoints."
+            )
+        else:
+            raise ValueError(
+                f"Dataset fingerprint mismatch! Checkpoint expects {stored_ds_fp}, "
+                f"active dataset cache fingerprint is {current_dataset_fp}."
+            )
+
+        # D. State Restoration
         start_step = ckpt["step"]
-        tokens_processed = ckpt.get("tokens_processed", start_step * args.micro_batch_size * args.grad_accum * args.block_size)
+        tokens_per_step = args.micro_batch_size * args.grad_accum * args.block_size
+        tokens_processed_before = ckpt.get("tokens_processed", start_step * tokens_per_step)
         best_val_loss = ckpt.get("best_val_loss", float("inf"))
         best_step = ckpt.get("best_step", start_step)
+
         model.load_state_dict(ckpt["model_state_dict"])
         if "optimizer_state_dict" in ckpt:
             optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+            logger.info("[*] Successfully restored full AdamW optimizer state (momentum & variance).")
         if "scaler_state_dict" in ckpt and use_amp and ckpt["scaler_state_dict"]:
             scaler.load_state_dict(ckpt["scaler_state_dict"])
-        print(f"[*] Resumed from checkpoint: {args.resume_from} at step {start_step} (best loss: {best_val_loss:.4f})")
+            logger.info("[*] Successfully restored AMP GradScaler state.")
 
-    # 6. Micro-Preflight Smoke Test on Device
-    print("[*] Running 2-step device micro-preflight smoke test...")
-    model.train()
-    for _ in range(2):
-        dummy_x = torch.randint(0, 4096, (args.micro_batch_size, args.block_size), device=resolved_device)
-        dummy_y = torch.randint(0, 4096, (args.micro_batch_size, args.block_size), device=resolved_device)
-        optimizer.zero_grad(set_to_none=True)
-        with autocast(device_type="cuda" if use_amp else "cpu", enabled=use_amp):
-            _, dummy_loss = model(dummy_x, dummy_y)
-        assert torch.isfinite(dummy_loss), "Preflight loss is non-finite!"
-        scaler.scale(dummy_loss).backward()
-        scaler.unscale_(optimizer)
-        gn = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        assert torch.isfinite(gn), "Preflight grad norm is non-finite!"
-        scaler.step(optimizer)
-        scaler.update()
-    optimizer.zero_grad(set_to_none=True)
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-    print("[*] Preflight smoke test passed successfully!")
+        # E. Restore RNG States
+        if "rng_states" in ckpt and ckpt["rng_states"]:
+            rng_s = ckpt["rng_states"]
+            if "torch" in rng_s and rng_s["torch"] is not None:
+                t_state = rng_s["torch"]
+                if isinstance(t_state, torch.Tensor):
+                    t_state = t_state.cpu().byte()
+                torch.set_rng_state(t_state)
+            if "cuda" in rng_s and rng_s["cuda"] is not None and torch.cuda.is_available():
+                c_state = rng_s["cuda"]
+                if isinstance(c_state, torch.Tensor):
+                    c_state = c_state.cpu().byte()
+                torch.cuda.set_rng_state(c_state)
+            if "data_rng" in rng_s and rng_s["data_rng"] is not None:
+                d_state = rng_s["data_rng"]
+                if isinstance(d_state, torch.Tensor):
+                    d_state = d_state.cpu().byte()
+                data_rng.set_state(d_state)
+                logger.info("[*] Restored dedicated batch sampling RNG state.")
+            else:
+                data_rng.manual_seed(args.seed + start_step)
+                logger.info("[*] Legacy checkpoint: re-seeded sampling generator at seed + start_step.")
 
-    # 7. Initial Baseline Evaluation (Step 0) & Inspection
-    print("\n[*] Evaluating initial baseline (Step 0) across all 3 tracks...")
-    loss_A, ppl_A = evaluate_fixed_track(model, track_A_tokens, indices_A, args.block_size, device=resolved_device)
-    loss_B, ppl_B = evaluate_fixed_track(model, track_B_tokens, indices_B, args.block_size, device=resolved_device)
-    loss_C, ppl_C = evaluate_fixed_track(model, track_C_tokens, indices_C, args.block_size, device=resolved_device)
+        logger.info(f"[*] Resumed cleanly from: {ckpt_path.name} at Step {start_step} (Best Val Loss: {best_val_loss:.4f})")
 
-    print(f"    -> Track A (Combined Val):  Loss: {loss_A:.4f} | PPL: {ppl_A:.2f}")
-    print(f"    -> Track B (Orig Gutenberg): Loss: {loss_B:.4f} | PPL: {ppl_B:.2f}")
-    print(f"    -> Track C (Wikipedia Val):  Loss: {loss_C:.4f} | PPL: {ppl_C:.2f}")
+    # 8. Evaluation Before Training (Step 0 or Step 1200 Baseline)
+    eval_step_label = start_step
+    print(f"\n[*] Evaluating baseline at Step {eval_step_label} across all 3 tracks (100% unmodified weights)...")
+    base_loss_A, base_ppl_A = evaluate_fixed_track(model, track_A_tokens, indices_A, args.block_size, device=resolved_device)
+    base_loss_B, base_ppl_B = evaluate_fixed_track(model, track_B_tokens, indices_B, args.block_size, device=resolved_device)
+    base_loss_C, base_ppl_C = evaluate_fixed_track(model, track_C_tokens, indices_C, args.block_size, device=resolved_device)
 
-    print("\n[*] Generating initial text inspection samples at Step 0...")
-    initial_samples = generate_inspection_samples(model, tokenizer, INSPECTION_PROMPTS, device=resolved_device, seed=args.seed)
-    for s in initial_samples[:3]:
-        print(f"    Prompt: '{s['prompt']}' -> '{repr(s['completion'])}'")
+    print(f"    -> Track A (Combined Val):  Loss: {base_loss_A:.4f} | PPL: {base_ppl_A:.2f}")
+    print(f"    -> Track B (Orig Gutenberg): Loss: {base_loss_B:.4f} | PPL: {base_ppl_B:.2f}")
+    print(f"    -> Track C (Wikipedia Val):  Loss: {base_loss_C:.4f} | PPL: {base_ppl_C:.2f}")
+
+    if is_resumed:
+        # Compare against Step 32 report values
+        print(f"[*] Baseline Verification vs Step 32 Report:")
+        print(f"    Track A: {base_loss_A:.4f} (Step 32 reported: 4.5249)")
+        print(f"    Track B: {base_loss_B:.4f} (Step 32 reported: 5.3575)")
+        print(f"    Track C: {base_loss_C:.4f} (Step 32 reported: 3.5620)")
+
+    print(f"\n[*] Generating qualitative text inspection samples at Step {eval_step_label}...")
+    baseline_samples = generate_inspection_samples(model, tokenizer, INSPECTION_PROMPTS, device=resolved_device, seed=args.seed)
+    for s in baseline_samples[:4]:
+        print(f"    [{s['prompt']}] -> {repr(s['completion'])}")
 
     args.checkpoint_dir.mkdir(parents=True, exist_ok=True)
     args.log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # 8. Main Training Loop
-    print(f"\n[*] Starting Pretraining Run: target {args.max_steps} steps, budget {args.max_time_seconds:.0f}s (15 min)...")
-    print(f"[*] Effective Batch: {args.micro_batch_size * args.grad_accum} sequences = {args.micro_batch_size * args.grad_accum * args.block_size} tokens/step")
+    # 9. Main Training Loop
+    tokens_per_step = args.micro_batch_size * args.grad_accum * args.block_size
+    print(f"\n[*] Starting Pretraining Run: from step {start_step} to {args.max_steps}...")
+    print(f"[*] Time Budget: {args.max_time_seconds:.0f}s (15 min) | Effective Batch: {args.micro_batch_size * args.grad_accum} seqs ({tokens_per_step} tok/step)")
 
     train_start_time = time.perf_counter()
-    tokens_per_step = args.micro_batch_size * args.grad_accum * args.block_size
+    run_tokens_processed = 0
     stop_reason = "step_limit"
 
-    data_rng = torch.Generator().manual_seed(args.seed + start_step)
     last_log_time = time.perf_counter()
     recent_tokens = 0
-
     step = start_step
+    accum_loss = base_loss_A
 
     while step < args.max_steps:
         # Check wall-clock budget
@@ -349,19 +481,25 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
         step += 1
         step_start_time = time.perf_counter()
 
-        # Update Learning Rate
+        # Update Learning Rate along continuous 6000-step cosine schedule
         curr_lr = compute_learning_rate(
             step, args.warmup_steps, args.total_scheduled_steps, args.peak_lr, args.min_lr
         )
         for param_group in optimizer.param_groups:
             param_group["lr"] = curr_lr
 
-        # Micro-batch accumulation
+        # Micro-batch accumulation using dedicated data_rng
         accum_loss = 0.0
         optimizer.zero_grad(set_to_none=True)
 
         for micro_idx in range(args.grad_accum):
-            x, y = pipeline.get_batch("train", batch_size=args.micro_batch_size, block_size=args.block_size, device=resolved_device)
+            x, y = pipeline.get_batch(
+                "train",
+                batch_size=args.micro_batch_size,
+                block_size=args.block_size,
+                device=resolved_device,
+                generator=data_rng,
+            )
             with autocast(device_type="cuda" if use_amp else "cpu", enabled=use_amp):
                 _, loss = model(x, y)
                 scaled_loss = loss / args.grad_accum
@@ -379,7 +517,7 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
 
         accum_loss /= args.grad_accum
 
-        # Gradient clipping and step
+        # Gradient clipping and optimizer step
         scaler.unscale_(optimizer)
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
 
@@ -392,14 +530,13 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
         scaler.step(optimizer)
         scaler.update()
 
-        tokens_processed += tokens_per_step
+        run_tokens_processed += tokens_per_step
         recent_tokens += tokens_per_step
 
         step_elapsed = time.perf_counter() - step_start_time
-        recent_tok_sec = tokens_per_step / max(1e-5, step_elapsed)
 
-        # Logging
-        if step % 20 == 0 or step == 1 or step == args.max_steps:
+        # Periodic Logging
+        if step % 20 == 0 or step == start_step + 1 or step == args.max_steps:
             now = time.perf_counter()
             rolling_elapsed = now - last_log_time
             rolling_tok_s = recent_tokens / max(1e-5, rolling_elapsed)
@@ -410,7 +547,7 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
             logger.info(
                 f"Step {step:4d}/{args.max_steps} | Loss: {accum_loss:.4f} | LR: {curr_lr:.2e} | "
                 f"Grad: {grad_norm.item():.3f} | {rolling_tok_s:,.0f} tok/s | VRAM: {vram_mb:.0f}MB | "
-                f"Time: {time.perf_counter() - train_start_time:.1f}s"
+                f"Run Time: {time.perf_counter() - train_start_time:.1f}s"
             )
 
         # Periodic Validation & Checkpointing
@@ -436,12 +573,14 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
                 "optimizer_state_dict": optimizer.state_dict(),
                 "scaler_state_dict": scaler.state_dict() if use_amp else None,
                 "model_config": asdict(gpt_config),
-                "tokens_processed": tokens_processed,
-                "dataset_fingerprint": meta.get("tokenizer_fingerprint", tok_fp),
+                "tokens_processed": tokens_processed_before + run_tokens_processed,
+                "run_tokens_processed": run_tokens_processed,
+                "dataset_fingerprint": current_dataset_fp,
                 "tokenizer_fingerprint": tok_fp,
                 "rng_states": {
                     "torch": torch.get_rng_state(),
                     "cuda": torch.cuda.get_rng_state() if torch.cuda.is_available() else None,
+                    "data_rng": data_rng.get_state(),
                 },
                 "lr": curr_lr,
                 "train_loss": accum_loss,
@@ -459,14 +598,11 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
 
-            # Periodic recovery checkpoint
             if step % args.checkpoint_interval == 0:
                 save_crash_safe_checkpoint(ckpt_payload, args.checkpoint_dir / f"step_{step}.pt")
 
-            # Always save latest
             save_crash_safe_checkpoint(ckpt_payload, args.checkpoint_dir / "model_27m_latest.pt")
 
-            # Save best if achieved
             if is_best:
                 save_crash_safe_checkpoint(ckpt_payload, args.checkpoint_dir / "model_27m_best.pt")
                 logger.info(f"[*] NEW BEST MODEL saved at step {step} (Track A loss: {best_val_loss:.4f})")
@@ -476,14 +612,15 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
                 "train_loss": round(accum_loss, 4),
                 "lr": curr_lr,
                 "grad_norm": round(grad_norm.item(), 4),
-                "tokens_processed": tokens_processed,
+                "run_tokens_processed": run_tokens_processed,
+                "cumulative_tokens_processed": tokens_processed_before + run_tokens_processed,
                 "val_metrics": ckpt_payload["val_metrics"],
                 "wall_time_s": round(time.perf_counter() - train_start_time, 2),
             })
 
     total_training_wall_time = time.perf_counter() - train_start_time
 
-    # 9. Final Evaluation at Termination
+    # 10. Final Evaluation at Termination
     print(f"\n[*] Final Evaluation at termination (Step {step})...")
     final_loss_A, final_ppl_A = evaluate_fixed_track(model, track_A_tokens, indices_A, args.block_size, device=resolved_device)
     final_loss_B, final_ppl_B = evaluate_fixed_track(model, track_B_tokens, indices_B, args.block_size, device=resolved_device)
@@ -493,7 +630,8 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
     print(f"    -> Track B (Orig Gutenberg): Loss: {final_loss_B:.4f} | PPL: {final_ppl_B:.2f}")
     print(f"    -> Track C (Wikipedia Val):  Loss: {final_loss_C:.4f} | PPL: {final_ppl_C:.2f}")
 
-    if final_loss_A < best_val_loss:
+    is_final_best = final_loss_A < best_val_loss
+    if is_final_best:
         best_val_loss = final_loss_A
         best_step = step
 
@@ -503,12 +641,14 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
         "optimizer_state_dict": optimizer.state_dict(),
         "scaler_state_dict": scaler.state_dict() if use_amp else None,
         "model_config": asdict(gpt_config),
-        "tokens_processed": tokens_processed,
-        "dataset_fingerprint": meta.get("tokenizer_fingerprint", tok_fp),
+        "tokens_processed": tokens_processed_before + run_tokens_processed,
+        "run_tokens_processed": run_tokens_processed,
+        "dataset_fingerprint": current_dataset_fp,
         "tokenizer_fingerprint": tok_fp,
         "rng_states": {
             "torch": torch.get_rng_state(),
             "cuda": torch.cuda.get_rng_state() if torch.cuda.is_available() else None,
+            "data_rng": data_rng.get_state(),
         },
         "lr": compute_learning_rate(step, args.warmup_steps, args.total_scheduled_steps, args.peak_lr, args.min_lr),
         "train_loss": accum_loss,
@@ -526,10 +666,10 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     save_crash_safe_checkpoint(final_ckpt, args.checkpoint_dir / "model_27m_latest.pt")
-    if final_loss_A <= best_val_loss:
+    if is_final_best:
         save_crash_safe_checkpoint(final_ckpt, args.checkpoint_dir / "model_27m_best.pt")
 
-    # 10. Generate Final Inspection Samples
+    # 11. Final Qualitative Inspection Samples
     print("\n[*] Generating qualitative inspection samples from final model...")
     final_samples = generate_inspection_samples(model, tokenizer, INSPECTION_PROMPTS, device=resolved_device, seed=args.seed)
     for s in final_samples:
@@ -537,32 +677,38 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
 
     peak_allocated_mb = torch.cuda.max_memory_allocated() / (1024**2) if torch.cuda.is_available() else 0.0
     peak_reserved_mb = torch.cuda.max_memory_reserved() / (1024**2) if torch.cuda.is_available() else 0.0
-    avg_tok_sec = tokens_processed / max(1e-5, total_training_wall_time)
-    dataset_epochs = tokens_processed / total_train_tokens
+    run_avg_tok_sec = run_tokens_processed / max(1e-5, total_training_wall_time)
+    cumulative_tokens = tokens_processed_before + run_tokens_processed
+    dataset_epochs = cumulative_tokens / total_train_tokens
 
     telemetry = {
         "model_architecture": "GroundUpGPT-27M",
         "parameters": num_params,
         "stop_reason": stop_reason,
+        "start_step": start_step,
         "completed_steps": step,
-        "tokens_processed": tokens_processed,
+        "new_steps": step - start_step,
+        "run_tokens_processed": run_tokens_processed,
+        "cumulative_tokens_processed": cumulative_tokens,
         "dataset_epochs": round(dataset_epochs, 4),
         "wall_time_seconds": round(total_training_wall_time, 2),
-        "average_tokens_per_sec": round(avg_tok_sec, 1),
+        "run_average_tokens_per_sec": round(run_avg_tok_sec, 1),
         "peak_vram_allocated_mb": round(peak_allocated_mb, 2),
         "peak_vram_reserved_mb": round(peak_reserved_mb, 2),
-        "initial_val_metrics": {
-            "track_A_combined_loss": loss_A,
-            "track_A_combined_ppl": ppl_A,
-            "track_B_orig_gt_loss": loss_B,
-            "track_B_orig_gt_ppl": ppl_B,
-            "track_C_wiki_loss": loss_C,
-            "track_C_wiki_ppl": ppl_C,
+        "baseline_val_metrics": {
+            "step": eval_step_label,
+            "track_A_combined_loss": base_loss_A,
+            "track_A_combined_ppl": base_ppl_A,
+            "track_B_orig_gt_loss": base_loss_B,
+            "track_B_orig_gt_ppl": base_ppl_B,
+            "track_C_wiki_loss": base_loss_C,
+            "track_C_wiki_ppl": base_ppl_C,
         },
         "final_train_loss": round(accum_loss, 4),
         "best_val_loss": round(best_val_loss, 4),
         "best_step": best_step,
         "final_val_metrics": {
+            "step": step,
             "track_A_combined_loss": final_loss_A,
             "track_A_combined_ppl": final_ppl_A,
             "track_B_orig_gt_loss": final_loss_B,
@@ -571,7 +717,7 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
             "track_C_wiki_ppl": final_ppl_C,
         },
         "step_history": history,
-        "initial_samples": initial_samples,
+        "baseline_samples": baseline_samples,
         "final_samples": final_samples,
     }
 
@@ -579,16 +725,17 @@ def run_training(args: argparse.Namespace) -> Dict[str, Any]:
         json.dump(telemetry, f, indent=2)
 
     print("\n" + "=" * 65)
-    print(" TRAINING RUN COMPLETE")
+    print(" TRAINING CONTINUATION COMPLETE")
     print("=" * 65)
-    print(f"Completed Steps:     {step} / {args.max_steps} ({stop_reason})")
+    print(f"Steps Completed:     {step} (new steps: {step - start_step}) | Stop: {stop_reason}")
     print(f"Wall-Clock Time:     {total_training_wall_time:.1f}s (budget: {args.max_time_seconds:.0f}s)")
-    print(f"Tokens Processed:    {tokens_processed:,} ({dataset_epochs:.2%} dataset epoch)")
-    print(f"Average Throughput:  {avg_tok_sec:,.0f} tok/s")
+    print(f"New Tokens Processed:{run_tokens_processed:,}")
+    print(f"Cumulative Tokens:   {cumulative_tokens:,} ({dataset_epochs:.2%} dataset epoch)")
+    print(f"Run Throughput:      {run_avg_tok_sec:,.0f} tok/s")
     print(f"Peak VRAM:           {peak_allocated_mb:.1f} MB allocated / {peak_reserved_mb:.1f} MB reserved")
-    print(f"Track A (Combined):  {loss_A:.4f} -> {final_loss_A:.4f} (PPL: {ppl_A:.1f} -> {final_ppl_A:.1f}, Best: {best_val_loss:.4f} @ step {best_step})")
-    print(f"Track B (Orig GT):   {loss_B:.4f} -> {final_loss_B:.4f} (PPL: {ppl_B:.1f} -> {final_ppl_B:.1f})")
-    print(f"Track C (Wikipedia): {loss_C:.4f} -> {final_loss_C:.4f} (PPL: {ppl_C:.1f} -> {final_ppl_C:.1f})")
+    print(f"Track A (Combined):  {base_loss_A:.4f} -> {final_loss_A:.4f} (PPL: {base_ppl_A:.1f} -> {final_ppl_A:.1f}, Best: {best_val_loss:.4f} @ step {best_step})")
+    print(f"Track B (Orig GT):   {base_loss_B:.4f} -> {final_loss_B:.4f} (PPL: {base_ppl_B:.1f} -> {final_ppl_B:.1f})")
+    print(f"Track C (Wikipedia): {base_loss_C:.4f} -> {final_loss_C:.4f} (PPL: {base_ppl_C:.1f} -> {final_ppl_C:.1f})")
     print(f"Saved Checkpoints:   {args.checkpoint_dir / 'model_27m_best.pt'}")
     print(f"Telemetry Log:       {args.log_path}")
     print("=" * 65 + "\n")

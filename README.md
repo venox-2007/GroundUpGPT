@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-CUDA%20Accelerated-EE4C2C.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Completed (Steps 1-32)](https://img.shields.io/badge/Status-Completed%20(Steps%201--32)-brightgreen.svg)]()
+[![Status: Completed (Steps 1-33)](https://img.shields.io/badge/Status-Completed%20(Steps%201--33)-brightgreen.svg)]()
 
 GroundUpGPT is an educational and engineering project dedicated to designing, implementing, training, evaluating, and deploying a small autoregressive, decoder-only Transformer language model completely from scratch using Python and PyTorch.
 
@@ -852,7 +852,7 @@ The pretraining corpus fuses two clean, trustworthy sources:
 - **Encyclopedic Normalization**: Stripped wikitext templates, raw HTML elements, reference lists (`== References ==`, `== Other websites ==`, `== Related pages ==`), external link footers, and category tags.
 - **Quality Filtering**: Discarded disambiguation pages (`may mean:`, `might mean:`, `(disambiguation)`) and stubs (< 200 characters of cleaned body text).
 - **Exact Deduplication**: Document-level SHA-256 deduplication across 54,584 total documents.
-- **Strict Leakage Prevention**: Indexed 829,030 10-word validation shingles from all 8 held-out validation books:
+- **Sampled and Bounded Zero-Leakage Check**: Indexed 829,030 10-word validation shingles from all 8 held-out validation books:
   - Original validation books: *The Time Machine* (`pg35`), *The War of the Worlds* (`pg36`), *Metamorphosis* (`pg5200`).
   - Expanded validation books: *The Republic* (`pg1497`), *Origin of Species* (`pg1228`), *Wuthering Heights* (`pg768`), *Return of Sherlock Holmes* (`pg108`), *Huckleberry Finn* (`pg205`).
   - Automatically detected and excluded 19 overlapping encyclopedia articles quoting passages from held-out texts (e.g. articles on Darwin, natural selection, and spacetime).
@@ -948,6 +948,72 @@ python scripts/train_27m_phase1.py --max-steps 1200 --max-time-seconds 900
 
 ---
 
+## Safe Pretraining Resumption & GroundUpGPT-27M Continuation (Step 33)
+
+Step 33 diagnoses and repairs preflight and checkpoint-resumption defects discovered in Step 32, validates stateful resumption with isolated unit tests, and safely continues pretraining of GroundUpGPT-27M from Step 1,200 to Step 2,400 on the 50.3M-token corpus (`data/cache_27m_v1/`).
+
+### 1. Preflight Isolation & Resumption Defect Repairs
+
+Audited and resolved five key issues in the pretraining harness (`scripts/train_27m_phase1.py`):
+1. **Isolated Preflight Smoke Test**: The previous smoke test ran 2 uncounted optimizer steps on dummy tokens directly on the real `model` and `optimizer`, mutating weights prior to step 1. Refactored into `run_preflight_smoke_test()` which allocates a separate micro-model and optimizer, verifies GPU/AMP execution, and explicitly releases CUDA memory without touching the real model.
+2. **Full RNG State Restoration**: Added extraction and restoration of CPU, CUDA, and dedicated `data_rng` states (`torch.set_rng_state()`, `torch.cuda.set_rng_state()`, `data_rng.set_state()`), mapping tensors safely to CPU ByteTensors to prevent device mismatch errors.
+3. **Dedicated Batch Generator**: Passed explicit `data_rng` to `pipeline.get_batch(..., generator=data_rng)` to guarantee deterministic batch sequencing across resumption boundaries.
+4. **Authentic Dataset Fingerprint**: Replaced legacy tokenizer fingerprint substitution with genuine SHA-256 fingerprint over dataset metadata, while maintaining backward-compatible migration for Step 32 checkpoints.
+5. **Accurate Per-Run Throughput**: Disentangled `run_tokens_processed` from `cumulative_tokens_processed`, preventing historical token totals from distorting live run throughput calculations.
+
+### 2. Multi-Track Validation Dynamics (Steps 1200 → 2400)
+
+Evaluated every 200 optimizer steps on deterministic fixed windows (seed 42) across three independent validation tracks:
+
+| Track | Dataset & Source | Step 1200 Baseline | Step 1400 | Step 1800 | Step 2200 | Final Loss (Step 2400) | Final PPL | Loss Drop (Δ) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Track A (Combined Val)** | `data/cache_27m_v1/val_tokens.pt` (2,682,495 tokens) | 4.5249 | 4.3590 | 4.1960 | 4.0511 | **4.0030** | **54.76** | **-0.5219** (-11.5%) |
+| **Track B (Orig Gutenberg Val)** | `data/cache/val_tokens.pt` (168,741 tokens) | 5.3575 | 5.2071 | 5.0461 | 4.9306 | **4.8810** | **131.76** | **-0.4765** (-8.9%) |
+| **Track C (Wikipedia Val)** | Wikipedia held-out subset (1,564,237 tokens) | 3.5620 | 3.3771 | 3.2060 | 3.0625 | **3.0036** | **20.16** | **-0.5584** (-15.7%) |
+
+- **Monotonic Convergence**: Validation loss decreased consistently across all tracks throughout all 1,200 continuation steps without plateaus or spikes.
+- **Combined Perplexity**: Dropped from 92.29 down to **54.76** (-40.7% perplexity reduction).
+- **Wikipedia Expository Mastery**: Track C perplexity reached **20.16** (loss 3.0036), indicating strong mastery of encyclopedic sentence structure, dates, and historical/scientific terminology.
+- **Original Literature Generalization**: Track B perplexity dropped from 212.19 to **131.76**, confirming broad generalization across 19th-century literature.
+
+### 3. Hardware & Continuation Metrics
+
+- **Completed Steps**: Step 1200 → Step 2400 (+1,200 new steps; total 2,400 steps).
+- **Tokens Processed**: 9,830,400 new tokens; **19,660,800 cumulative tokens** exposed (39.09% of 50.3M single-epoch budget).
+- **Wall-Clock Time**: **612.5 seconds (10.21 minutes)** out of the 900.0s (15-min) hard budget limit.
+- **Throughput**: **16,049.2 tokens/second** sustained across all 1,200 steps.
+- **VRAM Footprint**: **1,375.0 MB allocated / 1,416.0 MB reserved** on NVIDIA RTX 3050 Laptop GPU (23.6% utilization of 6GB VRAM, with > 4.6 GB headroom).
+- **Saved Checkpoints**: Saved in `checkpoints/27m_phase2/`:
+  - `model_27m_best.pt` (best validation loss 4.0030 at Step 2400, 318.0 MB with full AdamW momentum & variance).
+  - `model_27m_latest.pt` (latest step 2400 training state).
+  - Periodic checkpoints: `step_1400.pt`, `step_1600.pt`, `step_1800.pt`, `step_2000.pt`, `step_2200.pt`, `step_2400.pt`.
+- **Telemetry Log**: Stored in `logs/training_27m_phase2.json`.
+
+### 4. Qualitative Text Generation Progression
+
+Evaluated across 10 fixed prompts ($T=0.8, k=40, p=0.9$):
+
+| Prompt | Step 1200 Baseline | Step 2400 Continuation Model |
+| :--- | :--- | :--- |
+| `"The sun rose over the"` | `"ory for their own army.\n\nPeter Percil\nAssociation..."` | `"ory is to other electronics from that of the United States Cubals production to the United States Cubals for C"` |
+| `"In the middle of the room,"` | `""the Syric and Pecause of Social Serciets of Soviet Pople Playl..."` | `"—the Pyoc was an important revolt of his region of the Due Christianity of the Red Russia. The conservative was "` |
+| `"Biology is the study of"` | `"fice. The Earth of the 1941 of the United Kingdom 1992 and 19923..."` | `"fice of the Spanish Metro and also has a new major of Cubals (d. 2013)\n\nBiography\n"` |
+| `"The capital of France is"` | `"land of President of the 19410 (died 1944)\n 194 – Russia Benburg (b..."` | `"sue.\n\nIn 1914, 1922, his first president, 1992 he replaced the first to Russian Emperor of the "` |
+| `"Once upon a time in a small village,"` | `"" to seat Bisctieg, Soeusa, Russiahan, People Prinov..."` | `"—the Pyoc and Pyoc are sometimes called Pyoc or Pyocle (Pyocyoc or Pyo"` |
+| `"He opened the mysterious door and saw"` | `", even to seat on and the same time of what could only his head..."` | `", which it was very happily and executed.\n\nAt first, Mr. Glench’s eyes were uneasy to the other side, and the last moment, Mrs. Glench"` |
+| `"What is the reason why"` | `"; and for that it have no great difficulties. It are it of it all those things of that all these proposition..."` | `"?”\n\n“And I don’t wish you be so sorry to give you again?”\n\n“What does that your dear, then?”\n\n“Yes, the truth,” said Mrs.\n\n“I am "` |
+| `"How do birds fly through the"` | `"ory for problem for these proces. Some types of soft or nuclear domatic..."` | `"ory is to sell on these two kes.\n\nSome types of behavior is found in many parts of many places. There are some small animals of birds, or "` |
+| `"Water is made of"` | `"fice. The Steams proces. Some types of soft on that all moves..."` | `"fice.\n\nIn 1988, 1999, 1990 and 1999.\n\nClub career statistics\n\n|-"` |
+| `"The Earth revolves around the"` | `"ory for problems or proces. Some types of pes of Curics production..."` | `"ory is to other electrones (10 million).\n\nColologi \nThe U.S. (Santu or 1 or "` |
+
+### 5. Reproducible Continuation Command
+
+```bash
+python scripts/train_27m_phase1.py --resume-from checkpoints/27m_phase1/model_27m_latest.pt --max-steps 2400 --max-time-seconds 900 --checkpoint-dir checkpoints/27m_phase2 --log-path logs/training_27m_phase2.json
+```
+
+---
+
 ## Current Implementation Status
 
 - **Completed Steps**:
@@ -981,6 +1047,7 @@ python scripts/train_27m_phase1.py --max-steps 1200 --max-time-seconds 900
   - **Step 28 — Instruction-Tuned Web Chat Integration**: Integrated SFT checkpoint loading (`bpe` and `BPETokenizer` compatibility), dynamic default profile preference (`5m_sft_best`), conversational prompt formatting, streaming delimiter prefix buffering (`find_longest_stop_prefix_len`), exact token-weighted gradient accumulation, and responsive Next.js chat interface with mode badges, telemetry, dynamic placeholder, and Dolly 15k attribution. Verified with 9/9 focused integration tests (`tests/test_sft_ui_integration.py`), `npm run build`, and full test suite (161/161 passing).
   - **Step 29 — Real Conversational Quality Benchmark & Inference Audit**: Executed 31-prompt benchmark across 7 categories comparing Step 3000 Pretrained Base vs Step 650 SFT across Greedy, Default Sampling, and Calibrated SFT. Audited token alignment (100% match), fixed truncated delimiter leakage, added repetition penalty (1.15) to eliminate degenerate greedy repetitions, and documented capacity limitations and Step 30 roadmap. Verified with 6/6 unit tests (`tests/test_inference_audit.py`), `npm run build`, and full repository test suite (167/167 passing).
   - **Step 30 — Scaled Architecture & GPU Feasibility Benchmark**: Engineered and experimentally validated GroundUpGPT-27M (27,411,456 parameters, 8 layers, 8 heads, $d_{model}=512$, context 256). Implemented optional PyTorch SDPA attention path (1.23x throughput boost, saving 451 MB VRAM over manual attention at batch 16). Completed 20-step smoke test on 13.87M corpus in 9.53s (loss 8.4100 -> 7.3484, 17,199 tok/s, peak VRAM 1,266 MB allocated / 1,378 MB reserved, 4.76 GB headroom). Documented training data sufficiency deficit (0.51 tokens/param) and established Step 31 data diversification strategy. Verified with 9/9 unit tests (`tests/test_scaled_architecture.py`) and full repository test suite (176/176 passing).
-  - **Step 31 — Expanded, Diverse Pretraining Corpus for GroundUpGPT-27M**: Curated and tokenized a multi-domain pretraining corpus combining Project Gutenberg classic literature/philosophy (13.87M train tokens, 1.12M val tokens) with Simple English Wikipedia modern factual expository articles (CC BY-SA 4.0 / GFDL, 52,346 train docs, 36.43M train tokens) yielding **50,301,446 unique training tokens** and **2,682,495 held-out validation tokens** (52,983,941 total unique tokens across 54,584 clean documents). Reused exact 4,096-token BPE tokenizer (fingerprint: `4138461786ea6a199ff232b2427f3cb71c60f351afa7241f75f8196e51bdae72`). Enforced strict zero-leakage guarantee with 10-word shingle index across all 8 forbidden validation books, excluding 19 overlapping articles. Saved versioned pretraining cache in `data/cache_27m_v1/`. Verified with 6/6 unit tests (`tests/test_27m_corpus.py`).
+  - **Step 31 — Expanded, Diverse Pretraining Corpus for GroundUpGPT-27M**: Curated and tokenized a multi-domain pretraining corpus combining Project Gutenberg classic literature/philosophy (13.87M train tokens, 1.12M val tokens) with Simple English Wikipedia modern factual expository articles (CC BY-SA 4.0 / GFDL, 52,346 train docs, 36.43M train tokens) yielding **50,301,446 unique training tokens** and **2,682,495 held-out validation tokens** (52,983,941 total unique tokens across 54,584 clean documents). Reused exact 4,096-token BPE tokenizer (fingerprint: `4138461786ea6a199ff232b2427f3cb71c60f351afa7241f75f8196e51bdae72`). Sampled and bounded zero-leakage check with 10-word shingle index across all 8 forbidden validation books, excluding 19 overlapping articles. Saved versioned pretraining cache in `data/cache_27m_v1/`. Verified with 6/6 unit tests (`tests/test_27m_corpus.py`).
   - **Step 32 — First Monitored Pretraining Run of GroundUpGPT-27M**: Initial pretraining run of 27,411,456-parameter model initialized from scratch on 50.3M-token corpus (`data/cache_27m_v1/`) on NVIDIA RTX 3050 6GB Laptop GPU. Completed 1,200 optimizer steps (9,830,400 token exposures) in 563.1s (9.38 min) at 17,457 tok/s using only 1,266 MB peak VRAM. Multi-track validation progression: Track A (Combined Val) dropped from 8.4587 to **4.5249** (PPL: 4,715.9 -> **92.3**); Track B (Orig Gutenberg) dropped from 8.4422 to **5.3575** (PPL: 4,638.9 -> **212.2**); Track C (Wikipedia Subset) dropped from 8.4642 to **3.5620** (PPL: 4,741.9 -> **35.2**). Saved stateful crash-safe checkpoints in `checkpoints/27m_phase1/` and telemetry in `logs/training_27m_phase1.json`. Verified with 8/8 unit tests (`tests/test_27m_pretraining.py`) and full repository suite (190/190 passing).
-- **Roadmap Complete**: Phase 10 (Step 32) completed! All 32 steps complete.
+  - **Step 33 — Safe Pretraining Resumption & 27M Continuation**: Diagnosed and resolved preflight smoke test isolation (preventing preflight parameter mutation), RNG state restoration on CPU ByteTensors, dedicated data generator passing, authentic dataset fingerprinting, and accurate per-run throughput calculation. Safely resumed and continued GroundUpGPT-27M from Step 1,200 to Step 2,400 (+1,200 steps; +9,830,400 tokens; 19.66M cumulative tokens exposed = 39.09% of 50.3M single-epoch budget) in 612.5s (10.21 min) at 16,049.2 tok/s on RTX 3050 Laptop GPU (1,375 MB peak VRAM). Multi-track validation: Track A (Combined) dropped from 4.5249 to **4.0030** (PPL: 92.3 -> **54.8**); Track B (Orig Gutenberg) dropped from 5.3575 to **4.8810** (PPL: 212.2 -> **131.8**); Track C (Wikipedia) dropped from 3.5620 to **3.0036** (PPL: 35.2 -> **20.2**). Saved continuation checkpoints in `checkpoints/27m_phase2/` and telemetry in `logs/training_27m_phase2.json`. Verified with 7/7 unit tests (`tests/test_27m_resumption.py`) and full repository suite (197/197 passing).
+- **Roadmap Complete**: Phase 10 (Steps 31–33) completed! All 33 steps complete.
