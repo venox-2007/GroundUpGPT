@@ -37,6 +37,9 @@ export interface ModelInfo {
   device: string;
   checkpoint_step?: number | null;
   checkpoint_val_loss?: number | null;
+  original_val_loss?: number | null;
+  expanded_val_loss?: number | null;
+  checkpoint_perplexity?: number | null;
 }
 
 export interface ModelProfileEntry {

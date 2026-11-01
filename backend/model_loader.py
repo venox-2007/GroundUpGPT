@@ -170,6 +170,9 @@ class ModelManager:
             device=target_device,
             checkpoint_step=checkpoint.get("step"),
             checkpoint_val_loss=checkpoint.get("val_loss"),
+            original_val_loss=checkpoint.get("original_val_loss"),
+            expanded_val_loss=checkpoint.get("expanded_val_loss"),
+            checkpoint_perplexity=checkpoint.get("perplexity") or checkpoint.get("expanded_perplexity"),
         )
 
         # 8. Atomically assign loaded components only after all validations pass

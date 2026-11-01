@@ -38,10 +38,22 @@ def test_checkpoint_discovery_only_existing(client):
 
 
 def test_profile_switching_best_and_step200(client):
-    """Verify switching between 5M Best, 5M Step 200, and Demo profiles."""
+    """Verify switching between Phase 2 Best, 5M Best, 5M Step 200, and Demo profiles."""
     profiles = get_available_profiles()
 
-    # 1. Switch to 5m_best if available
+    # 1. Switch to 5m_phase2_best if available
+    if "5m_phase2_best" in profiles:
+        res = client.post("/api/model/load", json={"profile": "5m_phase2_best"})
+        assert res.status_code == 200
+        info = res.json()
+        assert info["total_parameters"] == 5051904
+        assert info["block_size"] == 256
+        assert info["checkpoint_step"] == 3000
+        assert info["checkpoint_val_loss"] is not None
+        assert info["expanded_val_loss"] is not None
+        assert info["original_val_loss"] is not None
+
+    # 2. Switch to 5m_best if available
     if "5m_best" in profiles:
         res = client.post("/api/model/load", json={"profile": "5m_best"})
         assert res.status_code == 200
@@ -51,7 +63,7 @@ def test_profile_switching_best_and_step200(client):
         assert info["checkpoint_step"] == 1000
         assert info["checkpoint_val_loss"] == pytest.approx(5.4116, abs=0.01)
 
-    # 2. Switch to 5m_step200 if available
+    # 3. Switch to 5m_step200 if available
     if "5m_step200" in profiles:
         res = client.post("/api/model/load", json={"profile": "5m_step200"})
         assert res.status_code == 200
@@ -60,7 +72,7 @@ def test_profile_switching_best_and_step200(client):
         assert info["block_size"] == 256
         assert info["checkpoint_step"] == 200
 
-    # 3. Switch to Demo
+    # 4. Switch to Demo
     if "demo" in profiles:
         res = client.post("/api/model/load", json={"profile": "demo"})
         assert res.status_code == 200

@@ -81,6 +81,9 @@ class ModelInfoResponse(BaseModel):
     device: str
     checkpoint_step: Optional[int] = None
     checkpoint_val_loss: Optional[float] = None
+    original_val_loss: Optional[float] = None
+    expanded_val_loss: Optional[float] = None
+    checkpoint_perplexity: Optional[float] = None
 
 
 class HealthResponse(BaseModel):

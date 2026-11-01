@@ -9,18 +9,28 @@ from typing import Any, Dict, List, Optional
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 MODEL_PROFILES: Dict[str, Dict[str, Any]] = {
+    "5m_phase2_best": {
+        "model_name": "GroundUpGPT-5M Phase 2 Best (Step 3000)",
+        "checkpoint_path": str(REPO_ROOT / "checkpoints" / "5m_phase2" / "model_5m_best.pt"),
+        "tokenizer_path": str(REPO_ROOT / "checkpoints" / "bpe_vocab4096.json"),
+    },
+    "5m_phase2_latest": {
+        "model_name": "GroundUpGPT-5M Phase 2 Latest (Step 3000)",
+        "checkpoint_path": str(REPO_ROOT / "checkpoints" / "5m_phase2" / "model_5m_latest.pt"),
+        "tokenizer_path": str(REPO_ROOT / "checkpoints" / "bpe_vocab4096.json"),
+    },
     "5m_best": {
-        "model_name": "GroundUpGPT-5M Best",
+        "model_name": "GroundUpGPT-5M Continued Best (Step 1000)",
         "checkpoint_path": str(REPO_ROOT / "checkpoints" / "5m_continued" / "model_5m_best.pt"),
         "tokenizer_path": str(REPO_ROOT / "checkpoints" / "bpe_vocab4096.json"),
     },
     "5m_latest": {
-        "model_name": "GroundUpGPT-5M Latest",
+        "model_name": "GroundUpGPT-5M Continued Latest (Step 1000)",
         "checkpoint_path": str(REPO_ROOT / "checkpoints" / "5m_continued" / "model_5m_latest.pt"),
         "tokenizer_path": str(REPO_ROOT / "checkpoints" / "bpe_vocab4096.json"),
     },
     "5m_step200": {
-        "model_name": "GroundUpGPT-5M Step 200",
+        "model_name": "GroundUpGPT-5M Baseline (Step 200)",
         "checkpoint_path": str(REPO_ROOT / "checkpoints" / "5m_initial" / "model_5m_step200.pt"),
         "tokenizer_path": str(REPO_ROOT / "checkpoints" / "bpe_vocab4096.json"),
     },
@@ -42,7 +52,14 @@ MODEL_PROFILES: Dict[str, Dict[str, Any]] = {
 }
 
 
-CANONICAL_PROFILE_ORDER: List[str] = ["5m_best", "5m_latest", "5m_step200", "demo"]
+CANONICAL_PROFILE_ORDER: List[str] = [
+    "5m_phase2_best",
+    "5m_phase2_latest",
+    "5m_best",
+    "5m_latest",
+    "5m_step200",
+    "demo",
+]
 
 PROFILE_ALIASES: Dict[str, str] = {
     "5m_initial": "5m_step200",
@@ -56,23 +73,34 @@ def resolve_default_profile() -> str:
     if env_profile:
         return env_profile.lower().strip()
 
-    # 1. Prefer Best continued 5M checkpoint if available
-    p5m_best = REPO_ROOT / "checkpoints" / "5m_continued" / "model_5m_best.pt"
     p_bpe = REPO_ROOT / "checkpoints" / "bpe_vocab4096.json"
+
+    # 1. Prefer Phase 2 Best 5M checkpoint if available
+    p5m_p2_best = REPO_ROOT / "checkpoints" / "5m_phase2" / "model_5m_best.pt"
+    if p5m_p2_best.is_file() and p_bpe.is_file():
+        return "5m_phase2_best"
+
+    # 2. Prefer Phase 2 Latest 5M checkpoint if available
+    p5m_p2_latest = REPO_ROOT / "checkpoints" / "5m_phase2" / "model_5m_latest.pt"
+    if p5m_p2_latest.is_file() and p_bpe.is_file():
+        return "5m_phase2_latest"
+
+    # 3. Prefer Best continued 5M checkpoint (Step 1000) if available
+    p5m_best = REPO_ROOT / "checkpoints" / "5m_continued" / "model_5m_best.pt"
     if p5m_best.is_file() and p_bpe.is_file():
         return "5m_best"
 
-    # 2. Prefer Latest continued 5M checkpoint if available
+    # 4. Prefer Latest continued 5M checkpoint if available
     p5m_latest = REPO_ROOT / "checkpoints" / "5m_continued" / "model_5m_latest.pt"
     if p5m_latest.is_file() and p_bpe.is_file():
         return "5m_latest"
 
-    # 3. Prefer Initial Step 200 checkpoint if available
+    # 5. Prefer Initial Step 200 checkpoint if available
     p5m_step200 = REPO_ROOT / "checkpoints" / "5m_initial" / "model_5m_step200.pt"
     if p5m_step200.is_file() and p_bpe.is_file():
         return "5m_step200"
 
-    # 4. Fall back to demo checkpoint
+    # 6. Fall back to demo checkpoint
     return "demo"
 
 

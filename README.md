@@ -576,22 +576,79 @@ The script produces a side-by-side terminal comparison and records machine-reada
 
 ### 2. Model Selection in Backend and Web UI
 
-GroundUpGPT supports multiple ways to select and serve models:
+GroundUpGPT supports dynamic profile selection across all trained checkpoints:
 
-1. **Automatic Discovery (Default)**:
-   When `checkpoints/5m_initial/model_5m_step200.pt` exists, the backend automatically defaults to serving the trained 5.05M model. If missing, it smoothly falls back to the demo model.
+1. **Automatic Discovery & Default Profile**:
+   When `checkpoints/5m_phase2/model_5m_best.pt` exists, the backend automatically defaults to serving the Phase 2 Best 5.05M model (Step 3000). If missing, it smoothly falls back through `5m_best` (Step 1000) $\to$ `5m_step200` $\to$ `demo`.
 2. **Environment Variable Configuration**:
    ```powershell
+   # Force Phase 2 Best profile
+   $env:GROUNDUPGPT_MODEL_PROFILE = "5m_phase2_best"
+   python -m backend.main
+
+   # Force Step 1000 profile
+   $env:GROUNDUPGPT_MODEL_PROFILE = "5m_best"
+   python -m backend.main
+
+   # Force Step 200 baseline
+   $env:GROUNDUPGPT_MODEL_PROFILE = "5m_step200"
+   python -m backend.main
+
    # Force demo profile
    $env:GROUNDUPGPT_MODEL_PROFILE = "demo"
    python -m backend.main
-
-   # Force 5M profile
-   $env:GROUNDUPGPT_MODEL_PROFILE = "5m"
-   python -m backend.main
    ```
 3. **Interactive Web UI Switcher**:
-   The Web UI sidebar includes a **Model Profile** toggle button (`5.05M Model` / `Demo Model`). Clicking switches the active model dynamically via `POST /api/model/load`, updating the active parameters, context window, and tokenizer in real time without restarting the server.
+   The Web UI sidebar includes a **Model Profile** grid with buttons for each discovered model (`Phase 2 Best`, `Phase 2 (3K)`, `Step 1000`, `Step 200 (5M)`, `Demo (35K)`). Clicking switches the active model dynamically via `POST /api/model/load`, updating active parameters, step, context window, dual-track validation losses, and tokenizer in real time without restarting the server.
+
+---
+
+## Phase 2 Continued Pretraining & Quality Optimization (Steps 22–25)
+
+In Autonomous Development Batch 3, GroundUpGPT underwent dataset expansion, rigorous quality auditing, and Phase 2 pretraining:
+
+### 1. Expanded Real English Pretraining Corpus (Step 23)
+- **Sources**: 62 Project Gutenberg classic works (57 training books + 5 held-out validation books), covering narrative fiction, philosophy, science, history, and essays.
+- **Strict Data Isolation**: Zero data leakage from the original 3 held-out validation books (`pg35`, `pg36`, `pg5200`), which remain exclusively in `data/cache/val_tokens.pt` as an independent regression benchmark.
+- **Corpus Statistics**:
+  - Total Clean Training Bytes: **50.97 MB** (50,188,501 characters)
+  - Total Training Tokens: **13,871,198 tokens** (within 10M–20M target)
+  - Expanded Validation Tokens: **1,118,258 tokens** (5 held-out books)
+  - Total Raw Download: **49.37 MB** (well below 100 MB budget)
+- **Tokenizer Preservation**: 100% compatibility with existing 4,096-vocab byte-level BPE tokenizer (fingerprint `4138461786ea6a199ff232b2427f3cb71c60f351afa7241f75f8196e51bdae72`).
+
+### 2. Phase 2 Continued Pretraining (Step 24)
+- **Resumed From**: `checkpoints/5m_continued/model_5m_best.pt` (Step 1000).
+- **Schedule**: Explicit Phase 2 cosine decay schedule with 50-step linear warmup to a conservative peak learning rate of $2.5 \times 10^{-4}$ decaying to $3.0 \times 10^{-5}$.
+- **Hardware & Telemetry**: Trained on NVIDIA GeForce RTX 3050 6GB Laptop GPU.
+  - Steps: Step 1000 $\to$ Step 3000 (+2,000 steps)
+  - Additional Tokens Processed: **32,768,000 tokens**
+  - Elapsed Time: **508.95 seconds** (~8.48 min, strictly respecting the 15-minute cap)
+  - Peak VRAM: **744.7 MB**
+  - Average Throughput: **64,383 tokens/second**
+- **Dual-Track Evaluation**:
+  - Track 1 (Original Frozen Val): Loss dropped from 5.3404 $\to$ **4.8185** (**-40.7% perplexity reduction** from 208.59 $\to$ 123.78).
+  - Track 2 (Expanded Val): Loss dropped from 5.3043 $\to$ **4.5330** (**-53.8% perplexity reduction** from 201.19 $\to$ 93.04).
+
+### 3. Quantitative Model Comparison (Step 25)
+
+| Metric | Step 200 Baseline | Step 1000 Baseline | Phase 2 Best (Step 3000) | Overall Change |
+| :--- | :--- | :--- | :--- | :--- |
+| **Total Steps** | 200 | 1,000 | **3,000** | +2,800 steps |
+| **Parameters** | 5,051,904 | 5,051,904 | **5,051,904** | Preserved |
+| **Tokens Seen** | 3.28M | 15.56M | **48.33M** | +32.77M in Phase 2 |
+| **Track 1 Val Loss (Frozen)** | 6.1520 | 5.3404 | **4.8185** | **-21.7% from Step 200** |
+| **Track 1 Perplexity** | 469.68 | 208.59 | **123.78** | **-73.6% from Step 200** |
+| **Track 2 Val Loss (Expanded)**| ~6.05 | 5.3043 | **4.5330** | **-14.5% from Step 1000** |
+| **Track 2 Perplexity** | ~424 | 201.19 | **93.04** | **-53.8% from Step 1000** |
+| **Generation Speed** | ~228 tok/s | ~106 tok/s | **~77 tok/s** | Real-time on RTX 3050 |
+
+### 4. Qualitative Linguistic Assessment
+- **Word Correctness**: Dramatically improved. Misspelled words and random token fragments from early checkpoints are virtually absent.
+- **Grammar**: Sentence structures show proper subject-verb agreement, clause punctuation, dialogue quotation formatting, and pronoun references.
+- **Local Coherence**: Contextually coherent across 10–25 tokens (e.g. narrative style consistent with 19th-century English literature).
+- **Repetition**: Significantly reduced compared to Step 200, though greedy sampling ($T=0$) can still loop on certain repetitive phrases.
+- **Limitations**: The model is an autoregressive token predictor trained from scratch on 48M tokens. It does not possess reasoning, factual recall, or instruction-following capabilities.
 
 ---
 
@@ -613,11 +670,14 @@ GroundUpGPT supports multiple ways to select and serve models:
   - **Step 13 — Web Chat Frontend & Launchers**: Modern Next.js 14 App Router, React 18, TypeScript, and Tailwind CSS chat application in `frontend/`, real-time SSE streaming with `AbortController` cancellation, live token metrics, in-sidebar sampling controls, responsive interface, and hardened one-click Windows launchers (`Start GroundUpGPT.bat` and `Stop GroundUpGPT.bat`).
   - **Step 14 — Real Language Modeling Corpus Preparation**: Reusable dataset pipeline in `src/data_prep.py` and CLI in `scripts/prepare_dataset.py`, preparing 15 classic public-domain English literary works from Project Gutenberg (5.94 MB clean text, 5.84M characters, 12 train / 3 val documents, zero-leak document-level partitioning, and complete SHA-256 manifest in `data/processed/manifest.json`).
   - **Step 15 — Production BPE Tokenizer and Token Cache**: Fitted production 4,096-vocabulary byte-level BPE tokenizer on training documents (`checkpoints/bpe_vocab4096.json`, fingerprint `4138461786ea6a199ff232b2427f3cb71c60f351afa7241f75f8196e51bdae72`), optimized O(N) linked-list/heap merge algorithm, memoized piece encoding, and pre-tokenized binary token caches in `data/cache/` (1,361,831 train tokens, 168,741 val tokens, 3.89x compression ratio, and `PretokenizedDataPipeline` with causal one-token shifts).
-  - **Step 16 — Initial Training of Full 5.05M GroundUpGPT Model**: Scaled training experiment using `scripts/train_5m_gpt.py`, processing 3,276,800 tokens over 200 optimization steps (effective batch size 64, context length 256) on an NVIDIA RTX 3050 6GB Laptop GPU. Cross-entropy loss successfully decreased from 8.3522 (near theoretical random uniform baseline of ln(4096) ≈ 8.318) down to 5.8608 train / 6.1189 validation at 37,009.3 tokens/sec with peak VRAM footprint of only 744.7 MB. Saved checkpoint `checkpoints/5m_initial/model_5m_step200.pt` and documented training dynamics.
-  - **Step 17 — Model Evaluation & Seamless Web UI Selection**: Quantitative evaluation suite in `scripts/evaluate_model.py`, computing validation cross-entropy loss and perplexity ($\exp(\text{loss})$), generation throughput benchmarks, and comparative reporting between demo and 5M models. Integrated dynamic profile selection across backend (`backend/config.py`, `backend/app.py`), Next.js Web UI (`frontend/app`), and Windows launcher (`scripts/start_app.ps1`). Verified with 100% passing launcher tests (19/19) and full repository unit test suite (99/99).
+  - **Step 16 — Initial Training of Full 5.05M GroundUpGPT Model**: Scaled training experiment using `scripts/train_5m_gpt.py`, processing 3,276,800 tokens over 200 optimization steps (effective batch size 64, context length 256) on an NVIDIA RTX 3050 6GB Laptop GPU. Cross-entropy loss successfully decreased from 8.3522 down to 5.8608 train / 6.1189 validation at 37,009.3 tokens/sec with peak VRAM footprint of only 744.7 MB. Saved checkpoint `checkpoints/5m_initial/model_5m_step200.pt`.
+  - **Step 17 — Model Evaluation & Seamless Web UI Selection**: Quantitative evaluation suite in `scripts/evaluate_model.py`, computing validation cross-entropy loss and perplexity ($\exp(\text{loss})$), generation throughput benchmarks, and comparative reporting between demo and 5M models. Integrated dynamic profile selection across backend, Web UI, and Windows launcher.
   - **Step 18 — Inference Safety & Stability**: Hardened model switching against untrusted/arbitrary file path injection by enforcing trusted profiles (`extra = "forbid"`), prevented partial state corruption on failed loads, and engineered cooperative stream cancellation with bounded backpressure queues and strict lock preservation. Verified with 6/6 focused unit tests (`tests/test_inference_safety.py`).
   - **Step 19 — Reproducible Language Model Evaluation**: Built deterministic frozen validation benchmark on held-out Project Gutenberg corpus (64 fixed windows, 16,384 tokens, seed 1337) preventing evaluation/training contamination. Isolated evaluation sampling from training batch RNG, enforced strict tokenizer fingerprint verification, and established Step 200 baseline metrics (`logs/baseline_step200_evaluation.json`: Loss 6.1520, PPL 469.67). Verified with 4/4 unit tests (`tests/test_reproducible_evaluation.py`).
-  - **Step 20 — Continued Pretraining with Monitored Checkpoints**: Safely resumed 5.05M GroundUpGPT pretraining from Step 200 (reusing verified `step_250.pt`) through Step 1,000 on RTX 3050 GPU (processing an additional 12,288,000 tokens at 61,770.6 tok/s across 198.9s). Preserved 1,000-step cosine decay schedule, optimizer state, scaler, and isolated RNG generators. Evaluated every 50 steps on the fixed Step 19 benchmark: validation loss dropped from 6.1520 to 5.4116, and perplexity dropped from 469.67 to 223.98 (-52.3% reduction). Saved protected checkpoints (`model_5m_best.pt`, `model_5m_latest.pt`, `step_300.pt`...`step_1000.pt`), telemetry in `logs/continued_training_summary.json`, and verified with 4/4 passing unit tests (`tests/test_continued_pretraining.py`).
-  - **Step 21 — Best Model Selection & Full UI Integration**: Enabled dynamic checkpoint discovery and runtime profile switching for `5m_best` (Step 1000, loss 5.4116), `5m_latest`, `5m_step200`, and `demo`. Updated Next.js sidebar with live model buttons, active step badges, real-time validation loss displays, and full streaming support across switches. Updated Windows launcher (`scripts/start_app.ps1`) to automatically discover the best trained checkpoint without retraining. Verified with 5/5 focused unit tests (`tests/test_model_selection.py`) and full repository test suite (118/118 passing).
+  - **Step 20 — Continued Pretraining with Monitored Checkpoints**: Resumed 5.05M GroundUpGPT pretraining from Step 200 through Step 1,000 on RTX 3050 GPU (processing an additional 12,288,000 tokens at 61,770.6 tok/s across 198.9s). Preserved 1,000-step cosine decay schedule, optimizer state, scaler, and isolated RNG generators. Validation loss dropped from 6.1520 to 5.4116, and perplexity dropped from 469.67 to 223.98 (-52.3% reduction). Saved protected checkpoints (`model_5m_best.pt`, `model_5m_latest.pt`, `step_300.pt`...`step_1000.pt`).
+  - **Step 21 — Best Model Selection & Full UI Integration**: Enabled dynamic checkpoint discovery and runtime profile switching for `5m_best` (Step 1000, loss 5.4116), `5m_latest`, `5m_step200`, and `demo`. Updated Next.js sidebar with live model buttons, active step badges, real-time validation loss displays, and full streaming support across switches. Verified with 5/5 focused unit tests (`tests/test_model_selection.py`) and full repository test suite (118/118 passing).
   - **Step 22 — Model Quality Audit & Baseline Hardening**: Deduplicated model profile discovery ensuring distinct model artifacts are exposed only once in API and UI, bound active profile identity strictly to backend state, verified 100% zero-leak isolation between 12 training and 3 validation books (`manifest.json`), resolved metadata discrepancy in evaluation script, and audited deterministic baselines on GPU (Step 200 loss: 6.1520, PPL: 469.68; Step 1000 loss: 5.3404, PPL: 208.59). Saved audit report in `logs/baseline_audit_step22.json`. Verified with 20/20 focused tests.
-- **Roadmap Complete**: Phase 5 (Steps 18–21) complete; Phase 6 Quality Optimization active.
+  - **Step 23 — Expand Licensed English Pretraining Corpus**: Curated 50 additional public-domain works from Project Gutenberg (49.37 MB raw download, zero leakage of original validation books `pg35`, `pg36`, `pg5200`). Prepared 62 total documents (57 train, 5 expanded val) yielding **13,871,198 clean training tokens** and **1,118,258 expanded validation tokens**. Reused exact 4,096-vocab BPE tokenizer without retraining (fingerprint verified). Saved binary cache in `data/cache_expanded/`. Verified with 6/6 unit tests (`tests/test_expanded_data.py`).
+  - **Step 24 — Quality-Focused Continued Pretraining (Phase 2)**: Resumed from Step 1000 best checkpoint and trained through Step 3000 (+2,000 steps, +32,768,000 tokens processed) on RTX 3050 Laptop GPU in 508.95s (8.48 min, within 15-min cap). Implemented explicit Phase 2 cosine decay schedule (warmup to 2.5e-4 decaying to 3.0e-5). Tracked dual validation benchmarks: Track 1 (Original Frozen Val) dropped from 5.3404 to **4.8185** (PPL: 123.78, **-40.7%** reduction); Track 2 (Expanded Val) dropped from 5.3043 to **4.5330** (PPL: 93.04, **-53.8%** reduction). Saved checkpoints (`checkpoints/5m_phase2/`) and telemetry (`logs/training_phase2_5m.json`). Verified with 4/4 unit tests (`tests/test_phase2_pretraining.py`).
+  - **Step 25 — Model Comparison & Web UI Integration**: Executed comparative benchmarking (`scripts/compare_models_step25.py`) across Step 1000 Baseline, Phase 2 Best, and Phase 2 Latest. Extended backend profile discovery to expose all distinct checkpoints (`5m_phase2_best`, `5m_phase2_latest`, `5m_best`, `5m_latest`, `5m_step200`, `demo`) with automatic preference for Phase 2 Best. Updated Next.js UI sidebar to render active step, dual-track validation losses (Orig Val, Exp Val), and perplexity. Verified Windows launcher preflight (19/19 tests), Next.js production build (`npm run build`), and full repository test suite (131/131 passing).
+- **Roadmap Complete**: Phase 6 (Steps 22–25) successfully completed! All 25 steps complete.

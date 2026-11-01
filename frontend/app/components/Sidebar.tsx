@@ -61,8 +61,10 @@ export function Sidebar({
   };
 
   const getProfileButtonLabel = (key: string, name: string): string => {
-    if (key === "5m_best") return "Best (5M)";
-    if (key === "5m_latest") return "Latest (5M)";
+    if (key === "5m_phase2_best") return "Phase 2 Best";
+    if (key === "5m_phase2_latest") return "Phase 2 (3K)";
+    if (key === "5m_best") return "Step 1000";
+    if (key === "5m_latest") return "Continued (1K)";
     if (key === "5m_step200" || key === "5m_initial") return "Step 200 (5M)";
     if (key === "demo") return "Demo (35K)";
     return name;
@@ -231,7 +233,31 @@ export function Sidebar({
                     </span>
                   </div>
                 )}
-                {modelInfo.checkpoint_val_loss !== undefined && modelInfo.checkpoint_val_loss !== null && (
+                {modelInfo.original_val_loss !== undefined && modelInfo.original_val_loss !== null && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Orig Val:</span>
+                    <span className="text-teal-400">
+                      {modelInfo.original_val_loss.toFixed(4)}
+                    </span>
+                  </div>
+                )}
+                {modelInfo.expanded_val_loss !== undefined && modelInfo.expanded_val_loss !== null && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Exp Val:</span>
+                    <span className="text-teal-400">
+                      {modelInfo.expanded_val_loss.toFixed(4)}
+                    </span>
+                  </div>
+                )}
+                {modelInfo.checkpoint_perplexity !== undefined && modelInfo.checkpoint_perplexity !== null && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Perplexity:</span>
+                    <span className="text-teal-400">
+                      {modelInfo.checkpoint_perplexity.toFixed(1)}
+                    </span>
+                  </div>
+                )}
+                {modelInfo.checkpoint_val_loss !== undefined && modelInfo.checkpoint_val_loss !== null && modelInfo.original_val_loss === undefined && (
                   <div className="flex justify-between">
                     <span className="text-slate-500">Val Loss:</span>
                     <span className="text-teal-400">
