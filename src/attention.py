@@ -150,6 +150,7 @@ class MultiHeadCausalSelfAttention(nn.Module):
         block_size: int,
         dropout: float = 0.0,
         bias: bool = False,
+        use_sdpa: bool = False,
     ) -> None:
         super().__init__()
         if embed_dim <= 0:
@@ -169,6 +170,8 @@ class MultiHeadCausalSelfAttention(nn.Module):
         self.num_heads: int = num_heads
         self.head_dim: int = embed_dim // num_heads
         self.block_size: int = block_size
+        self.dropout_p: float = dropout
+        self.use_sdpa: bool = use_sdpa
 
         # Independent heads operating on head_dim
         self.heads: nn.ModuleList = nn.ModuleList([
@@ -222,7 +225,20 @@ class MultiHeadCausalSelfAttention(nn.Module):
                 f"Sequence length ({seq_len}) exceeds configured block_size ({self.block_size})."
             )
 
-        # Run independent heads in parallel
+        # Fast-path: PyTorch native scaled dot-product attention kernel (FlashAttention / memory-efficient)
+        # Used when use_sdpa is enabled and attention weight inspection is not requested.
+        if self.use_sdpa and not return_weights:
+            q = torch.stack([head.q_proj(x) for head in self.heads], dim=1)
+            k = torch.stack([head.k_proj(x) for head in self.heads], dim=1)
+            v = torch.stack([head.v_proj(x) for head in self.heads], dim=1)
+            dropout_p = self.dropout_p if self.training else 0.0
+            sdpa_out = F.scaled_dot_product_attention(q, k, v, is_causal=True, dropout_p=dropout_p)
+            # (B, H, T, head_dim) -> (B, T, H * head_dim) = (B, T, embed_dim)
+            concatenated = sdpa_out.transpose(1, 2).contiguous().view(batch_size, seq_len, self.embed_dim)
+            out = self.resid_dropout(self.proj(concatenated))
+            return out, None
+
+        # Standard educational path: manual per-head scaled dot-product attention with explicit mask
         head_outputs: list[torch.Tensor] = []
         head_weights: list[torch.Tensor] = []
 

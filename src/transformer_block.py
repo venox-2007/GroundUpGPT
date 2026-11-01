@@ -38,6 +38,7 @@ class TransformerBlock(nn.Module):
         block_size: int,
         dropout: float = 0.0,
         bias: bool = False,
+        use_sdpa: bool = False,
     ) -> None:
         super().__init__()
         self.embed_dim: int = embed_dim
@@ -52,6 +53,7 @@ class TransformerBlock(nn.Module):
             block_size=block_size,
             dropout=dropout,
             bias=bias,
+            use_sdpa=use_sdpa,
         )
         self.ln2: nn.LayerNorm = nn.LayerNorm(embed_dim)
         self.ffn: FeedForward = FeedForward(

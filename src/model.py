@@ -41,6 +41,7 @@ class GPTConfig:
     bias: bool = False
     weight_tying: bool = True
     init_std: float = 0.02
+    use_sdpa: bool = False
 
     def __post_init__(self) -> None:
         """Validate architectural constraints and hyperparameter bounds."""
@@ -91,6 +92,7 @@ class GroundUpGPT(nn.Module):
                 block_size=config.block_size,
                 dropout=config.dropout,
                 bias=config.bias,
+                use_sdpa=config.use_sdpa,
             )
             for _ in range(config.num_layers)
         ])
@@ -247,3 +249,47 @@ class GroundUpGPT(nn.Module):
             },
             "total_unique_trainable": self.get_num_params(),
         }
+
+    def set_use_sdpa(self, use_sdpa: bool) -> None:
+        """Dynamically toggle scaled_dot_product_attention across all Transformer blocks."""
+        self.config.use_sdpa = use_sdpa
+        for block in self.blocks:
+            block.attn.use_sdpa = use_sdpa
+
+
+def get_5m_config(block_size: int = 256, dropout: float = 0.1, use_sdpa: bool = False) -> GPTConfig:
+    """Standard baseline ~5.05M GroundUpGPT configuration.
+
+    Parameters: 5,051,904 unique trainable parameters.
+    Architecture: 5 layers, 4 heads, d_model=256, vocab=4096.
+    """
+    return GPTConfig(
+        vocab_size=4096,
+        block_size=block_size,
+        embed_dim=256,
+        num_heads=4,
+        num_layers=5,
+        dropout=dropout,
+        bias=False,
+        weight_tying=True,
+        use_sdpa=use_sdpa,
+    )
+
+
+def get_27m_config(block_size: int = 256, dropout: float = 0.1, use_sdpa: bool = False) -> GPTConfig:
+    """Scaled ~27.4M GroundUpGPT-27M configuration for feasibility and scaling experiments.
+
+    Parameters: 27,411,456 unique trainable parameters.
+    Architecture: 8 layers, 8 heads, d_model=512, vocab=4096.
+    """
+    return GPTConfig(
+        vocab_size=4096,
+        block_size=block_size,
+        embed_dim=512,
+        num_heads=8,
+        num_layers=8,
+        dropout=dropout,
+        bias=False,
+        weight_tying=True,
+        use_sdpa=use_sdpa,
+    )

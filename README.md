@@ -756,6 +756,78 @@ In Step 29, the instruction-tuned GroundUpGPT model underwent an exhaustive, obj
    - However, at 5.05M parameters ($d_{model}=256, 5\text{ layers}, 4\text{ heads}$), factual knowledge capacity is strictly limited. Factual QA and multi-step arithmetic remain hallucinated.
    - **Step 30 Recommendation**: Advance to **Strategy B** (scale architecture capacity on RTX 3050 6GB) or maintain focused task curriculum, as 5.05M parameters is a hard mathematical capacity ceiling for open-domain factual retrieval.
 
+## Scaled GPT Architecture & GPU Feasibility Benchmark (Step 30)
+
+In Step 30, GroundUpGPT scales to a **27.4M parameter** architecture (`GroundUpGPT-27M`), experimentally validating memory footprint, attention efficiency, throughput, and optimization stability on our NVIDIA GeForce RTX 3050 Laptop GPU (6GB VRAM, 16GB RAM).
+
+### 1. GroundUpGPT-27M Architecture & Parameter Breakdown
+
+- **Vocabulary**: 4,096 tokens (exact production BPE tokenizer)
+- **Context Length ($T$)**: 256 tokens
+- **Embedding Dimension ($d_{model}$)**: 512
+- **Transformer Layers**: 8
+- **Attention Heads**: 8 ($d_{head} = 64$)
+- **Feed-Forward Expansion**: $4 \times d_{model} = 2048$ with GELU
+- **Weight Tying**: Enabled (`lm_head.weight` tied to `token_embedding.weight`)
+- **Dropout**: 0.1
+
+| Component | Submodule Details | Parameters | % of Total |
+| :--- | :--- | :---: | :---: |
+| **Token Embeddings** | $4096 \times 512$ lookup table | 2,097,152 | 7.65% |
+| **Position Embeddings** | $256 \times 512$ learned lookup table | 131,072 | 0.48% |
+| **Transformer Blocks (8)** | 8 blocks $\times$ 3,147,776 params | 25,182,208 | 91.87% |
+| *— Multi-Head Attention (per block)* | $W_q, W_k, W_v (3 \times 512 \times 512) + W_o (512 \times 512)$ | *1,048,576* | *3.83%* |
+| *— Feed-Forward Network (per block)* | $W_1 (512 \times 2048) + W_2 (2048 \times 512)$ | *2,097,152* | *7.65%* |
+| *— LayerNorms (per block)* | $\text{LN}_1 (512 \times 2) + \text{LN}_2 (512 \times 2)$ | *2,048* | *0.01%* |
+| **Final LayerNorm** | $512 \times 2$ scale and shift | 1,024 | <0.01% |
+| **Language Modeling Head** | Weight-tied to token embedding | 0 *(tied)* | 0.00% |
+| **Total Unique Trainable** | **GroundUpGPT-27M** | **27,411,456** | **100.0%** |
+
+### 2. Attention Efficiency Audit: Manual Attention vs PyTorch SDPA
+
+Empirical profiling on RTX 3050 Laptop GPU (fp16 AMP, context length 256):
+
+| Attention Implementation | Batch Size | Forward (ms) | Backward (ms) | Total Step (ms) | Training Throughput | Peak VRAM Alloc | Peak VRAM Res |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Manual Causal Attention** | 4 | 37.9 ms | 51.9 ms | 111.4 ms | 9,195.9 tok/s | 889.6 MB | 920.0 MB |
+| **PyTorch SDPA** | 4 | **19.5 ms** | **38.8 ms** | **80.0 ms** | **12,801.2 tok/s** | **773.9 MB** | **808.0 MB** |
+| **Manual Causal Attention** | 8 | 42.9 ms | 85.8 ms | 150.4 ms | 13,620.7 tok/s | 1,389.3 MB | 1,418.0 MB |
+| **PyTorch SDPA** | 8 | **31.2 ms** | **72.2 ms** | **125.1 ms** | **16,370.9 tok/s** | **1,161.8 MB** | **1,222.0 MB** |
+| **Manual Causal Attention** | 16 | 79.5 ms | 163.6 ms | 265.0 ms | 15,457.7 tok/s | 2,388.6 MB | 2,444.0 MB |
+| **PyTorch SDPA** | 16 | **58.4 ms** | **134.5 ms** | **214.7 ms** | **19,077.1 tok/s** | **1,937.6 MB** | **2,038.0 MB** |
+
+> [!TIP]
+> At batch size 16, PyTorch SDPA provides a **1.23x throughput boost** (19,077.1 tok/s vs 15,457.7 tok/s) and saves **451.0 MB of VRAM** (1,937.6 MB vs 2,388.6 MB).
+> Both implementations share identical state-dict parameter keys and compute identical forward outputs to machine precision ($< 10^{-4}$).
+
+### 3. Optimization Smoke Test (20 Steps)
+
+Executed on the real expanded English pretraining corpus (`data/cache_expanded/`, 13.87M tokens):
+- **Optimizer**: AdamW ($lr=3 \times 10^{-4}$, weight_decay=0.01, betas=(0.9, 0.95), grad_clip=1.0)
+- **Batching**: Micro-batch 8 $\times$ accumulation 4 = 32 sequences (8,192 tokens/step)
+- **Wall Time**: **9.53 seconds** total (average 476.5 ms / step)
+- **Loss Progression**: **8.4100** (step 1) $\to$ **7.8568** (step 5) $\to$ **7.5416** (step 10) $\to$ **7.3992** (step 15) $\to$ **7.3484** (step 20) ($-1.0616$ loss reduction)
+- **Gradient Norm**: 1.6019 $\to$ 0.3317 (smooth, stable convergence; zero NaNs or Infs)
+- **Throughput**: **17,199.1 tokens/sec**
+- **Peak VRAM**: **1,266.3 MB allocated / 1,378.0 MB reserved** (using only 22.4% of device capacity; **4,765.5 MB headroom remaining**)
+- **Checkpoint Serialization**: Round-trip verified at `checkpoints/smoke_test_27m/model_27m_smoke.pt`
+
+### 4. Training Data Sufficiency & Scaling Assessment
+
+- **Unique Training Tokens**: 13,871,198 tokens
+- **Unique Model Parameters**: 27,411,456 parameters
+- **Tokens-per-Parameter Ratio**: **0.51 tokens / parameter**
+- **Chinchilla Optimal Ratio**: 20.0 tokens / parameter (548.2M tokens target)
+- **Corpus Coverage**: Current corpus represents only **2.5%** of Chinchilla-optimal volume (**39.5x deficit**).
+- **Overfitting Risk**: High if repeated for $>2\text{--}3$ epochs on the same 62 literary books. At 17,200 tok/s, an epoch completes in just **13.4 minutes**.
+- **Step 31 Strategy Recommendation**: **Expand and diversify pretraining data first** before launching full-scale pretraining. Curating an additional 40M–85M diverse English tokens (educational textbooks, encyclopedic summaries, dialogue transcripts) is necessary to prevent the 27.4M parameter capacity from rapidly memorizing repetitive literary text.
+
+### 5. Reproducible Benchmark Command
+
+```bash
+python scripts/benchmark_27m_feasibility.py --device cuda
+```
+
 ---
 
 ## Current Implementation Status
@@ -790,4 +862,5 @@ In Step 29, the instruction-tuned GroundUpGPT model underwent an exhaustive, obj
   - **Step 27 — First Supervised Instruction Fine-Tuning Run**: Executed bounded SFT run on RTX 3050 Laptop GPU from Step 3000 base checkpoint through 650 optimizer steps (1.62 min wall time, well under 10-min budget). Token-weighted assistant-only SFT validation loss dropped from 6.5486 to **3.8380** (perplexity dropped from 698.30 to **46.43**). Monitored frozen LM benchmark for catastrophic forgetting (loss 4.5685 -> 5.2730 / PPL 96.40 -> 195.00). Verified stop-sequence termination at `<|endoftext|>`, evaluated 6 unseen conversational benchmark prompts, and saved protected checkpoints (`checkpoints/5m_sft/`). Verified with 8/8 unit tests (`tests/test_sft_training.py`).
   - **Step 28 — Instruction-Tuned Web Chat Integration**: Integrated SFT checkpoint loading (`bpe` and `BPETokenizer` compatibility), dynamic default profile preference (`5m_sft_best`), conversational prompt formatting, streaming delimiter prefix buffering (`find_longest_stop_prefix_len`), exact token-weighted gradient accumulation, and responsive Next.js chat interface with mode badges, telemetry, dynamic placeholder, and Dolly 15k attribution. Verified with 9/9 focused integration tests (`tests/test_sft_ui_integration.py`), `npm run build`, and full test suite (161/161 passing).
   - **Step 29 — Real Conversational Quality Benchmark & Inference Audit**: Executed 31-prompt benchmark across 7 categories comparing Step 3000 Pretrained Base vs Step 650 SFT across Greedy, Default Sampling, and Calibrated SFT. Audited token alignment (100% match), fixed truncated delimiter leakage, added repetition penalty (1.15) to eliminate degenerate greedy repetitions, and documented capacity limitations and Step 30 roadmap. Verified with 6/6 unit tests (`tests/test_inference_audit.py`), `npm run build`, and full repository test suite (167/167 passing).
-- **Roadmap Complete**: Phase 8 (Step 29) completed! All 29 steps complete.
+  - **Step 30 — Scaled Architecture & GPU Feasibility Benchmark**: Engineered and experimentally validated GroundUpGPT-27M (27,411,456 parameters, 8 layers, 8 heads, $d_{model}=512$, context 256). Implemented optional PyTorch SDPA attention path (1.23x throughput boost, saving 451 MB VRAM over manual attention at batch 16). Completed 20-step smoke test on 13.87M corpus in 9.53s (loss 8.4100 -> 7.3484, 17,199 tok/s, peak VRAM 1,266 MB allocated / 1,378 MB reserved, 4.76 GB headroom). Documented training data sufficiency deficit (0.51 tokens/param) and established Step 31 data diversification strategy. Verified with 9/9 unit tests (`tests/test_scaled_architecture.py`) and full repository test suite (176/176 passing).
+- **Roadmap Complete**: Phase 9 (Step 30) completed! All 30 steps complete.
