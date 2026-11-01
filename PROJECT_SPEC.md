@@ -73,6 +73,8 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
 | Production BPE & Token Cache | AI Engine | **Implemented** | 4096-vocab BPE tokenizer & pre-tokenized cache with causal shifts (Step 15) |
 | Full 5M Model Training | AI Engine | **Implemented** | Bounded pretraining experiment on RTX 3050 (Step 16) |
 | Model Evaluation & UI Selection | Full-Stack | **Implemented** | Quantitative perplexity benchmarking & live Web UI profile switching (Step 17) |
+| SFT Conversation Data Pipeline | AI Engine | **Implemented** | Databricks Dolly 15k, assistant-only masked loss, zero-leak splits (Step 26) |
+| Instruction Fine-Tuning (SFT) | AI Engine | **Implemented** | Bounded SFT run, 650 steps, PPL 698 -> 46.4, LM benchmark tracking (Step 27) |
 
 ---
 
@@ -109,6 +111,9 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
    - Step 23: Expand real English pretraining corpus (50 new Gutenberg books, 49.37 MB download, 13.87M clean train tokens, 1.12M expanded val tokens, zero-leak verification against pg35/36/5200, tokenizer fingerprint match). *(Implemented)*
    - Step 24: Quality-focused Phase 2 pretraining on expanded corpus with dual-track validation (Step 1000 -> Step 3000, 32.77M tokens, Track 1 loss dropped 5.3404 -> 4.8185, Track 2 loss dropped 5.3043 -> 4.5330 / PPL 93.04). *(Implemented)*
    - Step 25: Model comparison across Step 1000 Baseline, Phase 2 Best, and Phase 2 Latest, trusted profile integration (`5m_phase2_best` default), UI sidebar dual validation display, launcher preflight verification, and full repository test suite pass (131/131 passed). *(Implemented)*
+7. **Phase 7: Supervised Instruction Fine-Tuning (SFT)** *(Steps 26–27)*
+   - Step 26: Supervised conversation dataset and tokenization pipeline. Sourced Databricks Dolly 15k (CC BY-SA 3.0), implemented `<|user|>\n`, `<|assistant|>\n`, `<|endoftext|>\n` delimiters, PII scrubbing, deduplication, zero-leak splitting, assistant-only loss masking with `-100`, and cached 9,373 examples (8,435 train, 938 val, 1.18M tokens). *(Implemented)*
+   - Step 27: First bounded supervised instruction fine-tuning run. Fine-tuned Step 3000 model weights on Dolly 15k for 650 steps (1.62 min wall time, RTX 3050 GPU). SFT validation loss dropped from 6.5486 to 3.8380 (PPL dropped 698.30 -> 46.43). Monitored frozen LM benchmark (loss 4.5685 -> 5.2730 / PPL 96.40 -> 195.00), tested end-of-turn delimiter stopping, and generated direct side-by-side conversational comparisons. *(Implemented)*
 
 ---
 

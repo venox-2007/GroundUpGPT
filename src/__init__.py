@@ -20,6 +20,8 @@ from src.generation import (
     TextGenerator,
     sample_next_token,
     decode_token_sequence,
+    format_sft_prompt,
+    generate_sft_response,
 )
 from src.sft_data import (
     ConversationTurn,
@@ -53,6 +55,8 @@ __all__ = [
     "TextGenerator",
     "sample_next_token",
     "decode_token_sequence",
+    "format_sft_prompt",
+    "generate_sft_response",
     "ConversationTurn",
     "ConversationExample",
     "TokenizedExample",

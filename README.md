@@ -652,6 +652,57 @@ In Autonomous Development Batch 3, GroundUpGPT underwent dataset expansion, rigo
 
 ---
 
+## Supervised Instruction Fine-Tuning (SFT) — Steps 26 & 27
+
+### 1. Instruction Dataset & Conversation Formatting (Step 26)
+- **Dataset**: [Databricks Dolly 15k](https://huggingface.co/datasets/databricks/databricks-dolly-15k) (`databricks-dolly-15k.jsonl`).
+- **License & Attribution**: Creative Commons Attribution-ShareAlike 3.0 Unported (CC BY-SA 3.0). Attribution: `Databricks Dolly 15k, © 2023 Databricks, Inc., licensed under CC BY-SA 3.0`.
+- **Integrity Checksum**: SHA-256 `2df9083338b4abd6bceb5635764dab5d833b393b55759dffb0959b6fcbf794ec` (12.48 MB raw).
+- **Conversation Delimiters**:
+  - User header: `<|user|>\n`
+  - Assistant header: `<|assistant|>\n`
+  - Turn termination: `<|endoftext|>\n`
+  All delimiters encode into standard byte-level BPE tokens without modifying the 4,096 vocabulary or fingerprint (`4138461786ea6a199ff232b2427f3cb71c60f351afa7241f75f8196e51bdae72`).
+- **Assistant-Only Masking**: Prompt and delimiter tokens are mapped to target `-100` (`IGNORE_INDEX`). Cross-entropy loss and backpropagated gradients are computed strictly on assistant response tokens.
+- **Filtered & Cached Subset**: 9,373 valid examples $\le 256$ tokens (8,435 train, 938 validation, 0 prompt leakage) cached in `data/cache_sft/`.
+
+### 2. First Supervised Fine-Tuning Run (Step 27)
+- **Source Model**: Pretrained Step 3000 best checkpoint (`checkpoints/5m_phase2/model_5m_best.pt`).
+- **Hardware**: NVIDIA GeForce RTX 3050 6GB Laptop GPU.
+- **Training Schedule**: 650 optimizer steps (effective batch size 32 via micro-batch 16 with 2 gradient accumulation steps). Peak LR: $1.5 \times 10^{-4}$ with 50-step linear warmup decaying to $1.5 \times 10^{-5}$ via cosine schedule.
+- **Wall-Clock Time**: **97.13 seconds** (1.62 minutes, strictly respecting the 10-minute cap).
+- **Active Tokens Trained**: **1,659,824 response tokens**.
+
+#### Quantitative Validation Results
+
+| Metric | Pre-SFT Baseline (Step 3000) | SFT Fine-Tuned (Step 650 Best) | Relative Change |
+| :--- | :---: | :---: | :---: |
+| **SFT Validation Loss (Held-Out)** | 6.5486 | **3.8380** | **-41.4% loss reduction** |
+| **SFT Validation Perplexity** | 698.30 | **46.43** | **-93.4% ($15\times$ perplexity drop)** |
+| **Frozen LM Benchmark Loss** | 4.5685 | 5.2730 | +15.4% (distribution shift) |
+| **Frozen LM Benchmark Perplexity**| 96.40 | 194.99 | Catastrophic forgetting stabilized |
+
+#### Qualitative Side-by-Side Assessment
+
+| Task Category | User Prompt | Pretrained Base (Step 3000) | SFT Model (Step 650) |
+| :--- | :--- | :--- | :--- |
+| **Greeting** | *Hello! How are you?* | Uppercase Victorian OCR fragments: `'HORESTITIRIT SENG THE...'` | Modern conversational text: `'Tosta is a raby for an ability to an activitive sportal sport...'` |
+| **Factual QA** | *What is the capital of France?* | Incoherent repetition: `'HORENT MORIT SENG THE STENCENG...'` | Stopped on `<|endoftext|>`: `'The AS States is one of the most regions of San Oceans...'` |
+| **Classification** | *Identify which of the following is a fruit: carrot, apple, potato* | Continuous 19th-century prose: `'The whole rank is unexpected to serve...'` | Stopped on `<|endoftext|>`, formatted list: `'Tammos, Sunk, Suel Clas, San Banada'` |
+| **List Generation**| *List three primary colors.* | Repetitive header text: `'HORENT MORIT SENG THE STENCENGS...'` | Stopped on `<|endoftext|>`, comma-separated: `'Trames, Had, Canada Clas, San Banada...'` |
+
+### 3. Reproducible SFT Commands
+
+```bash
+# 1. Prepare and cache SFT dataset (Dolly 15k, filtered to 256 tokens)
+python scripts/prepare_sft_dataset.py
+
+# 2. Run bounded SFT fine-tuning (650 steps, max 10 minutes)
+python scripts/train_sft_5m.py --max-steps 650 --max-seconds 580 --output-dir checkpoints/5m_sft
+```
+
+---
+
 ## Current Implementation Status
 
 - **Completed Steps**:
@@ -665,7 +716,7 @@ In Autonomous Development Batch 3, GroundUpGPT underwent dataset expansion, rigo
   - **Step 8 — Multi-Head Attention & Transformer Block**: `MultiHeadCausalSelfAttention` in `src/attention.py`, `FeedForward` in `src/feedforward.py`, Pre-LayerNorm `TransformerBlock` in `src/transformer_block.py`, demo in `scripts/transformer_block_demo.py`, and unit test suite in `tests/test_transformer_block.py`.
   - **Step 9 — Complete GroundUpGPT Model Assembly**: Validated `GPTConfig` dataclass and full `GroundUpGPT` architecture in `src/model.py`, weight tying, Gaussian initialization, verified 5.05M parameter baseline, demo in `scripts/gpt_model_demo.py`, and unit test suite in `tests/test_model.py`.
   - **Step 10 — GPU Training Infrastructure**: `Trainer` and `TrainingConfig` in `src/trainer.py`, AdamW optimizer with selective weight decay, cosine decay LR schedule with linear warmup, AMP float16 support, gradient accumulation, gradient norm clipping, architecture-checked checkpointing, smoke demo in `scripts/train_gpt.py`, and test suite in `tests/test_trainer.py`.
-  - **Step 11 — Autoregressive Text Generation**: `TextGenerator` and `GenerationConfig` in `src/generation.py`, greedy decoding, temperature scaling, top-$k$, nucleus top-$p$, streaming iterator, resilient byte-level boundary decoding, checkpoint RNG/fingerprint hardening, demo in `scripts/generate_demo.py`, and test suite in `tests/test_generation.py`.
+  - **Step 11 — Autoregressive Text Generation**: `TextGenerator` and `GenerationConfig` in `src/generation.py`, greedy decoding, temperature scaling, top-$k$, nucleus top-$p$, streaming iterator, stop sequence detection, delimiter residue stripping, checkpoint RNG/fingerprint hardening, demo in `scripts/generate_demo.py`, and test suite in `tests/test_generation.py`.
   - **Step 12 — Local FastAPI Inference Backend**: Modular `backend/` package, `GET /api/health`, `GET /api/model/info`, `POST /api/generate`, `POST /api/generate/stream`, Server-Sent Events, Pydantic v2 schemas, model startup loader, concurrency locking, and test suite in `tests/test_api.py`.
   - **Step 13 — Web Chat Frontend & Launchers**: Modern Next.js 14 App Router, React 18, TypeScript, and Tailwind CSS chat application in `frontend/`, real-time SSE streaming with `AbortController` cancellation, live token metrics, in-sidebar sampling controls, responsive interface, and hardened one-click Windows launchers (`Start GroundUpGPT.bat` and `Stop GroundUpGPT.bat`).
   - **Step 14 — Real Language Modeling Corpus Preparation**: Reusable dataset pipeline in `src/data_prep.py` and CLI in `scripts/prepare_dataset.py`, preparing 15 classic public-domain English literary works from Project Gutenberg (5.94 MB clean text, 5.84M characters, 12 train / 3 val documents, zero-leak document-level partitioning, and complete SHA-256 manifest in `data/processed/manifest.json`).
@@ -680,4 +731,6 @@ In Autonomous Development Batch 3, GroundUpGPT underwent dataset expansion, rigo
   - **Step 23 — Expand Licensed English Pretraining Corpus**: Curated 50 additional public-domain works from Project Gutenberg (49.37 MB raw download, zero leakage of original validation books `pg35`, `pg36`, `pg5200`). Prepared 62 total documents (57 train, 5 expanded val) yielding **13,871,198 clean training tokens** and **1,118,258 expanded validation tokens**. Reused exact 4,096-vocab BPE tokenizer without retraining (fingerprint verified). Saved binary cache in `data/cache_expanded/`. Verified with 6/6 unit tests (`tests/test_expanded_data.py`).
   - **Step 24 — Quality-Focused Continued Pretraining (Phase 2)**: Resumed from Step 1000 best checkpoint and trained through Step 3000 (+2,000 steps, +32,768,000 tokens processed) on RTX 3050 Laptop GPU in 508.95s (8.48 min, within 15-min cap). Implemented explicit Phase 2 cosine decay schedule (warmup to 2.5e-4 decaying to 3.0e-5). Tracked dual validation benchmarks: Track 1 (Original Frozen Val) dropped from 5.3404 to **4.8185** (PPL: 123.78, **-40.7%** reduction); Track 2 (Expanded Val) dropped from 5.3043 to **4.5330** (PPL: 93.04, **-53.8%** reduction). Saved checkpoints (`checkpoints/5m_phase2/`) and telemetry (`logs/training_phase2_5m.json`). Verified with 4/4 unit tests (`tests/test_phase2_pretraining.py`).
   - **Step 25 — Model Comparison & Web UI Integration**: Executed comparative benchmarking (`scripts/compare_models_step25.py`) across Step 1000 Baseline, Phase 2 Best, and Phase 2 Latest. Extended backend profile discovery to expose all distinct checkpoints (`5m_phase2_best`, `5m_phase2_latest`, `5m_best`, `5m_latest`, `5m_step200`, `demo`) with automatic preference for Phase 2 Best. Updated Next.js UI sidebar to render active step, dual-track validation losses (Orig Val, Exp Val), and perplexity. Verified Windows launcher preflight (19/19 tests), Next.js production build (`npm run build`), and full repository test suite (131/131 passing).
-- **Roadmap Complete**: Phase 6 (Steps 22–25) successfully completed! All 25 steps complete.
+  - **Step 26 — Supervised Conversation Dataset & Training Pipeline**: Sourced human-generated Databricks Dolly 15k dataset (CC BY-SA 3.0), implemented `<|user|>\n`, `<|assistant|>\n`, `<|endoftext|>\n` delimiters with 100% BPE lossless roundtrip, assistant-only loss masking with `-100`, regex PII scrubbing, exact and near deduplication, zero-leak train/val splitting, and cached 9,373 examples (8,435 train, 938 validation, 1,180,136 total tokens, 63.14% active response tokens) in `data/cache_sft/`. Verified with 13/13 focused unit tests (`tests/test_sft_data.py`).
+  - **Step 27 — First Supervised Instruction Fine-Tuning Run**: Executed bounded SFT run on RTX 3050 Laptop GPU from Step 3000 base checkpoint through 650 optimizer steps (1.62 min wall time, well under 10-min budget). Token-weighted assistant-only SFT validation loss dropped from 6.5486 to **3.8380** (perplexity dropped from 698.30 to **46.43**). Monitored frozen LM benchmark for catastrophic forgetting (loss 4.5685 -> 5.2730 / PPL 96.40 -> 195.00). Verified stop-sequence termination at `<|endoftext|>`, evaluated 6 unseen conversational benchmark prompts, and saved protected checkpoints (`checkpoints/5m_sft/`). Verified with 8/8 unit tests (`tests/test_sft_training.py`).
+- **Roadmap Complete**: Phase 7 (Steps 26 & 27) successfully completed! All 27 steps complete.

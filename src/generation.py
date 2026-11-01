@@ -29,6 +29,7 @@ class GenerationConfig:
         top_k: Top-k filtering (keeps top k highest probability tokens; None or <=0 disables).
         top_p: Nucleus top-p filtering (keeps cumulative probability <= top_p; None or >=1.0 disables).
         seed: Optional random seed for reproducible stochastic generation.
+        stop_sequences: Optional list of string delimiters that terminate generation upon detection.
     """
 
     max_new_tokens: int = 50
@@ -36,6 +37,7 @@ class GenerationConfig:
     top_k: Optional[int] = None
     top_p: Optional[float] = None
     seed: Optional[int] = None
+    stop_sequences: Optional[List[str]] = None
 
     def __post_init__(self) -> None:
         """Validate generation parameters."""
@@ -308,6 +310,7 @@ class TextGenerator:
 
         curr_tokens = list(prompt_ids)
         idx = torch.tensor(curr_tokens, dtype=torch.long, device=self.device).unsqueeze(0)
+        accumulated_text = ""
 
         with torch.inference_mode():
             for step in range(cfg.max_new_tokens):
@@ -336,9 +339,21 @@ class TextGenerator:
 
                 # 5. Decode Stream Delta
                 text_chunk = stream_decoder.decode_token(next_token_id)
-                is_finished = (step == cfg.max_new_tokens - 1)
-                if is_finished:
+                is_last_step = (step == cfg.max_new_tokens - 1)
+                if is_last_step:
                     text_chunk += stream_decoder.finalize()
+
+                accumulated_text += text_chunk
+
+                # 6. Check Stop Sequences
+                stopped = False
+                if cfg.stop_sequences:
+                    for stop_seq in cfg.stop_sequences:
+                        if stop_seq in accumulated_text:
+                            stopped = True
+                            break
+
+                is_finished = is_last_step or stopped
 
                 yield StreamChunk(
                     token_id=next_token_id,
@@ -346,6 +361,9 @@ class TextGenerator:
                     step=step,
                     is_finished=is_finished,
                 )
+
+                if stopped:
+                    break
 
     def generate(
         self,
@@ -411,6 +429,13 @@ class TextGenerator:
 
         # Safely decode full generated text
         generated_text = "".join(streamed_chunks)
+
+        # Clean stop sequences from generated text if present
+        if cfg.stop_sequences:
+            for stop_seq in cfg.stop_sequences:
+                if stop_seq in generated_text:
+                    generated_text = generated_text.split(stop_seq)[0]
+
         full_text = prompt + generated_text
         tokens_per_second = len(generated_ids) / max(elapsed_time, 1e-9)
 
@@ -430,3 +455,47 @@ class TextGenerator:
             context_limit=block_size,
             context_cropped=context_cropped,
         )
+
+
+def format_sft_prompt(prompt: str, context: Optional[str] = None) -> str:
+    """Format an instruction prompt matching the exact SFT conversation format."""
+    p = prompt.strip()
+    if context and context.strip():
+        return f"<|user|>\n{p}\n\nContext:\n{context.strip()}\n<|assistant|>\n"
+    return f"<|user|>\n{p}\n<|assistant|>\n"
+
+
+def generate_sft_response(
+    generator: TextGenerator,
+    prompt: str,
+    context: Optional[str] = None,
+    config: Optional[GenerationConfig] = None,
+) -> GenerationResult:
+    """Generate an assistant response to an instruction prompt, stopping at end-of-turn."""
+    formatted_prompt = format_sft_prompt(prompt, context=context)
+    cfg = config if config is not None else GenerationConfig()
+
+    stop_seqs = list(cfg.stop_sequences) if cfg.stop_sequences else []
+    for delim in ["<|endoftext|>", "<|user|>", "<|assistant|>"]:
+        if delim not in stop_seqs:
+            stop_seqs.append(delim)
+
+    sft_cfg = GenerationConfig(
+        max_new_tokens=cfg.max_new_tokens,
+        temperature=cfg.temperature,
+        top_k=cfg.top_k,
+        top_p=cfg.top_p,
+        seed=cfg.seed,
+        stop_sequences=stop_seqs,
+    )
+    result = generator.generate(prompt=formatted_prompt, config=sft_cfg)
+
+    # Clean any residual delimiter residues from the final response
+    cleaned_text = result.generated_text.strip()
+    for delim in ["<|endoftext|>", "<|user|>", "<|assistant|>"]:
+        if cleaned_text.endswith(delim):
+            cleaned_text = cleaned_text[: -len(delim)].strip()
+
+    result.generated_text = cleaned_text
+    return result
+
