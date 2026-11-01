@@ -42,6 +42,14 @@ MODEL_PROFILES: Dict[str, Dict[str, Any]] = {
 }
 
 
+CANONICAL_PROFILE_ORDER: List[str] = ["5m_best", "5m_latest", "5m_step200", "demo"]
+
+PROFILE_ALIASES: Dict[str, str] = {
+    "5m_initial": "5m_step200",
+    "5m": "5m_step200",
+}
+
+
 def resolve_default_profile() -> str:
     """Determine the default model profile based on environment and available checkpoints."""
     env_profile = os.getenv("GROUNDUPGPT_MODEL_PROFILE")
@@ -69,32 +77,34 @@ def resolve_default_profile() -> str:
 
 
 def get_available_profiles() -> Dict[str, Dict[str, Any]]:
-    """Return only profiles whose checkpoint and tokenizer files actually exist on disk."""
+    """Return only distinct canonical profiles whose checkpoint and tokenizer files exist on disk.
+
+    Guarantees no duplicate profiles pointing to the same underlying model checkpoint artifact.
+    """
     available = {}
-    display_order = ["5m_best", "5m_latest", "5m_step200", "5m_initial", "demo"]
-    for key in display_order:
+    seen_checkpoints = set()
+
+    for key in CANONICAL_PROFILE_ORDER:
         if key not in MODEL_PROFILES:
             continue
         prof = MODEL_PROFILES[key]
-        ckpt_p = Path(prof["checkpoint_path"])
-        tok_p = Path(prof["tokenizer_path"])
+        ckpt_p = Path(prof["checkpoint_path"]).resolve()
+        tok_p = Path(prof["tokenizer_path"]).resolve()
         if ckpt_p.is_file() and tok_p.is_file():
-            available[key] = prof
+            if str(ckpt_p) not in seen_checkpoints:
+                available[key] = prof
+                seen_checkpoints.add(str(ckpt_p))
 
-    # Check for legacy aliases if 5m_step200 is not present
-    if "5m_step200" not in available and "5m_best" not in available and "5m_latest" not in available:
-        v_init = MODEL_PROFILES.get("5m_initial")
-        if v_init and Path(v_init["checkpoint_path"]).is_file() and Path(v_init["tokenizer_path"]).is_file():
-            available["5m_initial"] = v_init
-
-    # Include any custom registered profiles (excluding redundant aliases)
+    # Check for custom registered profiles (excluding known aliases and duplicate artifacts)
     for k, v in MODEL_PROFILES.items():
-        if k in available or k in ("5m", "5m_initial", "5m_step200", "5m_best", "5m_latest", "demo"):
+        if k in available or k in PROFILE_ALIASES:
             continue
-        ckpt_p = Path(v["checkpoint_path"])
-        tok_p = Path(v["tokenizer_path"])
+        ckpt_p = Path(v["checkpoint_path"]).resolve()
+        tok_p = Path(v["tokenizer_path"]).resolve()
         if ckpt_p.is_file() and tok_p.is_file():
-            available[k] = v
+            if str(ckpt_p) not in seen_checkpoints:
+                available[k] = v
+                seen_checkpoints.add(str(ckpt_p))
 
     return available
 

@@ -144,3 +144,56 @@ def test_failed_checkpoint_load_preserves_active_model(client):
     # Active model must be completely preserved
     assert model_manager.is_loaded is True
     assert model_manager.model_info.model_name == active_before
+
+
+def test_profile_deduplication_no_duplicate_artifacts(client):
+    """Verify each distinct model artifact is returned only once (no duplicate profiles)."""
+    res = client.get("/api/model/profiles")
+    assert res.status_code == 200
+    data = res.json()
+    profiles = data["profiles"]
+
+    # No duplicate checkpoint file paths across exposed profiles
+    seen_paths = set()
+    for key, p in profiles.items():
+        resolved_ckpt = str(Path(p["checkpoint_path"]).resolve())
+        assert resolved_ckpt not in seen_paths, f"Duplicate checkpoint artifact exposed: {key} ({resolved_ckpt})"
+        seen_paths.add(resolved_ckpt)
+
+    # Ensure 5m_step200 and 5m_initial are not both in profiles
+    assert not ("5m_step200" in profiles and "5m_initial" in profiles), (
+        "Both 5m_step200 and 5m_initial are exposed simultaneously. Distinct artifacts must appear only once."
+    )
+
+
+def test_backward_compatible_aliases(client):
+    """Verify legacy profile aliases ('5m', '5m_initial') load correctly and map to canonical active identity."""
+    profiles = get_available_profiles()
+    if "5m_step200" in profiles or "5m_initial" in MODEL_PROFILES:
+        for alias in ("5m", "5m_initial"):
+            res = client.post("/api/model/load", json={"profile": alias})
+            assert res.status_code == 200
+            data = res.json()
+            assert data["active_profile"] == "5m_step200"
+            assert data["total_parameters"] == 5051904
+
+            # Verify /api/model/profiles reports canonical active profile
+            prof_res = client.get("/api/model/profiles")
+            assert prof_res.status_code == 200
+            prof_data = prof_res.json()
+            assert prof_data["active_profile"] == "5m_step200"
+
+
+def test_active_profile_consistency_across_all_profiles(client):
+    """Verify active profile identity is consistent between /api/model/info and /api/model/profiles."""
+    profiles = get_available_profiles()
+    for prof_key in profiles.keys():
+        load_res = client.post("/api/model/load", json={"profile": prof_key})
+        assert load_res.status_code == 200
+        info_data = load_res.json()
+        assert info_data["active_profile"] == prof_key
+
+        prof_res = client.get("/api/model/profiles")
+        assert prof_res.status_code == 200
+        prof_data = prof_res.json()
+        assert prof_data["active_profile"] == prof_key

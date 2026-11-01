@@ -104,6 +104,11 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
    - Step 19: Reproducible language model evaluation benchmark with deterministic sampling and metadata integrity. *(Implemented)*
    - Step 20: Continued pretraining from Step 200 to Step 1000 with monitored checkpoints, fixed benchmark evaluation, and lr-schedule resumption (Val Loss dropped from 6.1520 to 5.4116, Perplexity improved 469.67 -> 223.98). *(Implemented)*
    - Step 21: Best-checkpoint discovery, UI integration (Best 5M, Latest 5M, Step 200 5M, Demo), Windows launcher compatibility, and end-to-end full test suite verification (118/118 passed). *(Implemented)*
+6. **Phase 6: Quality Optimization & Expanded Pretraining** *(In Progress)*
+   - Step 22: Quality audit and baseline hardening (profile deduplication, validation split zero-leak verification, metadata alignment, and deterministic baseline evaluation on Step 200/1000). *(Implemented)*
+   - Step 23: Expand real English pretraining corpus (10M–20M tokens, copyright verification, document-level deduplication). *(Planned)*
+   - Step 24: Quality-focused continued pretraining on expanded corpus with two-track evaluation. *(Planned)*
+   - Step 25: Model comparison, best checkpoint selection, and web UI integration. *(Planned)*
 
 ---
 

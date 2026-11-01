@@ -106,9 +106,10 @@ def test_profiles_api_endpoint() -> None:
     data = res.json()
     assert "profiles" in data
     assert "demo" in data["profiles"]
-    assert "5m_initial" in data["profiles"]
+    step200_key = "5m_step200" if "5m_step200" in data["profiles"] else "5m_initial"
+    assert step200_key in data["profiles"]
     assert "checkpoint_exists" in data["profiles"]["demo"]
-    assert "checkpoint_exists" in data["profiles"]["5m_initial"]
+    assert "checkpoint_exists" in data["profiles"][step200_key]
 
 
 def test_dynamic_profile_switching_and_streaming() -> None:

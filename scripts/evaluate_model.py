@@ -258,9 +258,21 @@ def evaluate_checkpoint(
 
     # 1. Dataset Identity & Integrity
     val_tokens = torch.load(val_cache_path, map_location="cpu", weights_only=True).long()
+    manifest_path = REPO_ROOT / "data" / "processed" / "manifest.json"
+    val_books = []
+    if manifest_path.is_file():
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                manifest_data = json.load(f)
+            val_books = [d["title"] for d in manifest_data.get("documents", []) if d.get("split") == "val"]
+        except Exception:
+            val_books = []
+    if not val_books:
+        val_books = ["The Time Machine", "The War of the Worlds", "Metamorphosis"]
+
     dataset_info = {
         "dataset_name": "Project Gutenberg Held-Out Validation Split",
-        "dataset_books": ["Pride and Prejudice", "The Strange Case of Dr. Jekyll and Mr. Hyde", "Frankenstein"],
+        "dataset_books": val_books,
         "cache_file": str(val_cache_path.relative_to(REPO_ROOT)),
         "cache_sha256": compute_file_sha256(val_cache_path),
         "total_val_tokens": len(val_tokens),

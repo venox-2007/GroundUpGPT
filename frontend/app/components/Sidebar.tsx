@@ -37,16 +37,22 @@ export function Sidebar({
 
   const isProfileActive = (key: string): boolean => {
     if (!modelInfo) return false;
-    if (activeProfileKey && activeProfileKey === key) return true;
-    if (modelInfo.active_profile && modelInfo.active_profile === key) return true;
+    // Rely strictly on backend-provided active profile identity:
+    const activeKey = activeProfileKey || modelInfo.active_profile;
+    if (activeKey) {
+      if (activeKey === key) return true;
+      if (key === "5m_step200" && (activeKey === "5m_initial" || activeKey === "5m")) return true;
+      return false;
+    }
+    // Non-overlapping fallback only if active identity is absent:
     if (key === "5m_best") {
-      return modelInfo.checkpoint_step === 1000 && (!modelInfo.profile_name || modelInfo.profile_name.toLowerCase().includes("best"));
+      return modelInfo.checkpoint_step === 1000 && (!modelInfo.profile_name || !modelInfo.profile_name.toLowerCase().includes("latest"));
     }
     if (key === "5m_latest") {
       return modelInfo.checkpoint_step === 1000 && !!modelInfo.profile_name && modelInfo.profile_name.toLowerCase().includes("latest");
     }
-    if (key === "5m_step200" || key === "5m_initial" || key === "5m") {
-      return modelInfo.checkpoint_step === 200 || (modelInfo.vocab_size === 4096 && modelInfo.checkpoint_step !== 1000);
+    if (key === "5m_step200") {
+      return modelInfo.checkpoint_step === 200;
     }
     if (key === "demo") {
       return modelInfo.vocab_size < 4096;

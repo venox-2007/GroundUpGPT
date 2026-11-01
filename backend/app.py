@@ -16,7 +16,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from backend import __version__
-from backend.config import get_settings, MODEL_PROFILES, get_trusted_profile
+from backend.config import (
+    get_settings,
+    MODEL_PROFILES,
+    PROFILE_ALIASES,
+    get_trusted_profile,
+)
 from backend.model_loader import model_manager
 from backend.schemas import (
     GenerateRequest,
@@ -39,12 +44,16 @@ async def lifespan(app: FastAPI):
 
     if settings.auto_load_on_startup and not model_manager.is_loaded:
         try:
+            canonical_startup = PROFILE_ALIASES.get(
+                settings.model_profile.lower().strip(),
+                settings.model_profile.lower().strip(),
+            )
             model_manager.load_model(
                 checkpoint_path=settings.checkpoint_path,
                 tokenizer_path=settings.tokenizer_path,
                 device_name=settings.device,
                 model_name=settings.model_name,
-                active_profile_key=settings.model_profile,
+                active_profile_key=canonical_startup,
             )
         except FileNotFoundError as err:
             logger.warning(
@@ -138,12 +147,16 @@ async def load_model_endpoint(req: LoadModelRequest) -> ModelInfoResponse:
 
     async with model_manager.lock:
         try:
+            canonical_profile_key = PROFILE_ALIASES.get(
+                req.profile.lower().strip(),
+                req.profile.lower().strip(),
+            )
             model_manager.load_model(
                 checkpoint_path=prof["checkpoint_path"],
                 tokenizer_path=prof["tokenizer_path"],
                 device_name=settings.device,
                 model_name=prof["model_name"],
-                active_profile_key=req.profile,
+                active_profile_key=canonical_profile_key,
             )
         except FileNotFoundError as err:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err))
