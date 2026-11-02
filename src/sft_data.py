@@ -16,6 +16,7 @@ import hashlib
 import json
 import logging
 from pathlib import Path
+import random
 import re
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 
@@ -899,4 +900,207 @@ class SFTDataPipeline:
             tokenizer=tokenizer,
             pad_token_id=pad_token_id,
             max_seq_len=max_seq_len,
+        )
+
+
+class BlendedSFTDataPipeline:
+    """Blended SFT data pipeline combining a large general instruction dataset (Dolly 15k)
+    with a compact verified conversational anchor dataset.
+
+    Samples mini-batches dynamically from both source pools with configurable sampling weights,
+    guaranteeing substantial exposure to both sources while tracking sample counts, token exposures,
+    and category-level distributions.
+    """
+
+    def __init__(
+        self,
+        dolly_pipeline: SFTDataPipeline,
+        anchor_train_examples: List[Dict[str, Any]],
+        anchor_val_examples: List[Dict[str, Any]],
+        anchor_test_examples: Optional[List[Dict[str, Any]]] = None,
+        anchor_sample_prob: float = 0.55,
+        pad_token_id: int = 0,
+        pad_to_max_len: bool = False,
+        seed: int = 42,
+    ) -> None:
+        self.dolly_pipeline = dolly_pipeline
+        self.anchor_train_examples = anchor_train_examples
+        self.anchor_val_examples = anchor_val_examples
+        self.anchor_test_examples = anchor_test_examples or []
+        self.anchor_sample_prob = float(anchor_sample_prob)
+        self.pad_token_id = pad_token_id
+        self.pad_to_max_len = pad_to_max_len
+        self.rng = random.Random(seed)
+
+        # Exposure tracking
+        self.dolly_samples_drawn: int = 0
+        self.anchor_samples_drawn: int = 0
+        self.dolly_tokens_drawn: int = 0
+        self.anchor_tokens_drawn: int = 0
+        self.category_exposure_counts: Dict[str, int] = {}
+
+    @property
+    def val_dataset(self) -> List[Any]:
+        """Provides access to the primary held-out validation split (Dolly val)."""
+        return self.dolly_pipeline.val_dataset
+
+    @property
+    def val_anchor_dataset(self) -> List[Any]:
+        """Access to the held-out conversational anchor validation split."""
+        return self.anchor_val_examples
+
+    @property
+    def test_transfer_dataset(self) -> List[Any]:
+        """Access to the held-out conversational anchor transfer test split."""
+        return self.anchor_test_examples
+
+    @property
+    def max_seq_len(self) -> int:
+        return self.dolly_pipeline.max_seq_len
+
+    def get_batch(
+        self,
+        split: str = "train",
+        batch_size: int = 16,
+        device: Union[str, torch.device] = "cpu",
+        pad_to_max_len: Optional[bool] = None,
+        generator: Optional[torch.Generator] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Sample a batch from the blended pipeline."""
+        pad_flag = self.pad_to_max_len if pad_to_max_len is None else pad_to_max_len
+
+        if split == "train":
+            items: List[Any] = []
+            for _ in range(batch_size):
+                if self.anchor_train_examples and self.rng.random() < self.anchor_sample_prob:
+                    idx = self.rng.randrange(len(self.anchor_train_examples))
+                    ex = self.anchor_train_examples[idx]
+                    self.anchor_samples_drawn += 1
+                    r_toks = ex.get("response_tokens_count", 0)
+                    self.anchor_tokens_drawn += int(r_toks)
+                    cat = ex.get("category", "anchor")
+                    self.category_exposure_counts[cat] = self.category_exposure_counts.get(cat, 0) + 1
+                    items.append(ex)
+                else:
+                    idx = self.rng.randrange(len(self.dolly_pipeline.train_dataset))
+                    ex = self.dolly_pipeline.train_dataset[idx]
+                    self.dolly_samples_drawn += 1
+                    r_toks = getattr(ex, "response_tokens_count", None)
+                    if r_toks is None and isinstance(ex, dict):
+                        r_toks = ex.get("response_tokens_count", 0)
+                    self.dolly_tokens_drawn += int(r_toks or 0)
+                    cat = getattr(ex, "category", None) or (ex.get("category") if isinstance(ex, dict) else "dolly") or "dolly"
+                    self.category_exposure_counts[cat] = self.category_exposure_counts.get(cat, 0) + 1
+                    items.append(ex)
+
+            collated = collate_sft_batch(
+                items,
+                pad_token_id=self.pad_token_id,
+                pad_to_max_len=pad_flag,
+                max_seq_len=self.dolly_pipeline.max_seq_len,
+            )
+            return (
+                collated["input_ids"].to(device),
+                collated["target_ids"].to(device),
+                collated["loss_mask"].to(device),
+            )
+
+        elif split in ("val", "val_dolly"):
+            return self.dolly_pipeline.get_batch(
+                split="val",
+                batch_size=batch_size,
+                device=device,
+                pad_to_max_len=pad_flag,
+                generator=generator,
+            )
+
+        elif split == "val_anchor":
+            if not self.anchor_val_examples:
+                raise ValueError("No anchor validation examples available.")
+            indices = [self.rng.randrange(len(self.anchor_val_examples)) for _ in range(batch_size)]
+            items = [self.anchor_val_examples[i] for i in indices]
+            collated = collate_sft_batch(
+                items,
+                pad_token_id=self.pad_token_id,
+                pad_to_max_len=pad_flag,
+                max_seq_len=self.dolly_pipeline.max_seq_len,
+            )
+            return (
+                collated["input_ids"].to(device),
+                collated["target_ids"].to(device),
+                collated["loss_mask"].to(device),
+            )
+
+        elif split == "test_transfer":
+            if not self.anchor_test_examples:
+                raise ValueError("No anchor test transfer examples available.")
+            indices = [self.rng.randrange(len(self.anchor_test_examples)) for _ in range(batch_size)]
+            items = [self.anchor_test_examples[i] for i in indices]
+            collated = collate_sft_batch(
+                items,
+                pad_token_id=self.pad_token_id,
+                pad_to_max_len=pad_flag,
+                max_seq_len=self.dolly_pipeline.max_seq_len,
+            )
+            return (
+                collated["input_ids"].to(device),
+                collated["target_ids"].to(device),
+                collated["loss_mask"].to(device),
+            )
+        else:
+            raise ValueError(f"Unknown split: {split}")
+
+    def get_exposure_summary(self) -> Dict[str, Any]:
+        """Return quantitative accounting of sample exposures and target token exposures."""
+        tot_samples = self.dolly_samples_drawn + self.anchor_samples_drawn
+        tot_tokens = self.dolly_tokens_drawn + self.anchor_tokens_drawn
+        return {
+            "dolly_samples_drawn": self.dolly_samples_drawn,
+            "anchor_samples_drawn": self.anchor_samples_drawn,
+            "total_samples_drawn": tot_samples,
+            "anchor_sample_fraction": self.anchor_samples_drawn / max(1, tot_samples),
+            "dolly_target_tokens_drawn": self.dolly_tokens_drawn,
+            "anchor_target_tokens_drawn": self.anchor_tokens_drawn,
+            "total_target_tokens_drawn": tot_tokens,
+            "anchor_target_token_fraction": self.anchor_tokens_drawn / max(1, tot_tokens),
+            "category_exposures": dict(self.category_exposure_counts),
+        }
+
+    @classmethod
+    def load(
+        cls,
+        dolly_cache_dir: Union[str, Path],
+        anchor_cache_dir: Union[str, Path],
+        tokenizer: BPETokenizer,
+        anchor_sample_prob: float = 0.55,
+        pad_token_id: int = 0,
+        pad_to_max_len: bool = False,
+        seed: int = 42,
+    ) -> BlendedSFTDataPipeline:
+        """Load Dolly SFT cache and anchor SFT cache into a unified blended pipeline."""
+        dolly_pipe = SFTDataPipeline.load(
+            save_dir=dolly_cache_dir,
+            tokenizer=tokenizer,
+            pad_token_id=pad_token_id,
+            pad_to_max_len=pad_to_max_len,
+        )
+
+        anchor_dir = Path(anchor_cache_dir)
+        train_file = anchor_dir / "train_anchor_tokens.pt"
+        val_file = anchor_dir / "val_anchor_tokens.pt"
+        test_file = anchor_dir / "test_transfer_tokens.pt"
+
+        anchor_train = torch.load(train_file, weights_only=False) if train_file.exists() else []
+        anchor_val = torch.load(val_file, weights_only=False) if val_file.exists() else []
+        anchor_test = torch.load(test_file, weights_only=False) if test_file.exists() else []
+
+        return cls(
+            dolly_pipeline=dolly_pipe,
+            anchor_train_examples=anchor_train,
+            anchor_val_examples=anchor_val,
+            anchor_test_examples=anchor_test,
+            anchor_sample_prob=anchor_sample_prob,
+            pad_token_id=pad_token_id,
+            pad_to_max_len=pad_to_max_len,
+            seed=seed,
         )
