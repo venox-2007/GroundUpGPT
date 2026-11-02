@@ -1,4 +1,17 @@
 export type Role = "user" | "assistant";
+export type KnowledgeMode = "off" | "evidence" | "grounded";
+
+export interface KnowledgeSource {
+  source_id: string;
+  session_id: string;
+  display_name: string;
+  source_type: string;
+  content_hash: string;
+  character_count: number;
+  token_count: number;
+  chunk_count: number;
+  created_at: string;
+}
 
 export interface MessageMetrics {
   promptTokens?: number;
@@ -20,7 +33,7 @@ export interface ChatMessage {
   error?: string;
   modelProfile?: string;
   mode?: "native" | "assisted";
-  origin?: "neural" | "safe_calculator" | "local_fact" | "tool_error" | string;
+  origin?: "neural" | "safe_calculator" | "local_fact" | "tool_error" | "document_excerpt" | "grounded_neural" | string;
   toolName?: string;
   factId?: string;
   provenance?: string;
@@ -33,7 +46,7 @@ export interface ChatMessage {
 export interface ToolResultEventPayload {
   request_id: string;
   mode: "native" | "assisted";
-  origin: "neural" | "safe_calculator" | "local_fact" | "tool_error" | string;
+  origin: "neural" | "safe_calculator" | "local_fact" | "tool_error" | "document_excerpt" | "grounded_neural" | string;
   answer_text: string;
   model_generated: boolean;
   model_profile?: string | null;

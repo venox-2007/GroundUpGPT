@@ -24,7 +24,9 @@ export function ChatMessageItem({
   const isCalculator = origin === "safe_calculator";
   const isLocalFact = origin === "local_fact";
   const isToolError = origin === "tool_error";
-  const isNeural = !isUser && (origin === "neural" || (!isCalculator && !isLocalFact && !isToolError));
+  const isDocumentExcerpt = origin === "document_excerpt";
+  const isGroundedNeural = origin === "grounded_neural";
+  const isNeural = !isUser && (origin === "neural" || isGroundedNeural || (!isCalculator && !isLocalFact && !isToolError && !isDocumentExcerpt));
 
   const getHeaderBadge = () => {
     if (isUser) {
@@ -51,6 +53,27 @@ export function ChatMessageItem({
         label: "Local Fact — Curated Record",
         tag: "Curated Fact",
         tagBg: "border-emerald-800 bg-emerald-950/60 text-emerald-300",
+      };
+    }
+    if (isDocumentExcerpt) {
+      return {
+        initial: "D",
+        iconBg: "bg-amber-600 text-white",
+        label: `User Document — ${message.provenance || "Knowledge Excerpt"}`,
+        tag: "Excerpt (0 Model Calls)",
+        tagBg: "border-amber-800 bg-amber-950/60 text-amber-300",
+      };
+    }
+    if (isGroundedNeural) {
+      const profileText = message.modelProfile
+        ? `GroundUpGPT (${message.modelProfile})`
+        : "GroundUpGPT";
+      return {
+        initial: "K",
+        iconBg: "bg-indigo-600 text-white",
+        label: `${profileText} — Grounded Neural`,
+        tag: "Grounded GPT",
+        tagBg: "border-indigo-800 bg-indigo-950/60 text-indigo-300",
       };
     }
     if (isToolError) {
@@ -175,6 +198,58 @@ export function ChatMessageItem({
                     "{message.details.supporting_passage}"
                   </div>
                 )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* User Document Excerpt or Grounded Details */}
+        {!isUser && (isDocumentExcerpt || isGroundedNeural) && (
+          <div className="mt-2.5 border-t border-slate-800/80 pt-2 text-xs">
+            <button
+              type="button"
+              onClick={() => setShowFactDetails(!showFactDetails)}
+              className={`flex items-center gap-1 text-[11px] font-mono transition ${
+                isDocumentExcerpt
+                  ? "text-amber-400 hover:text-amber-300"
+                  : "text-indigo-400 hover:text-indigo-300"
+              }`}
+            >
+              <span>{showFactDetails ? "▴ Hide Source Evidence" : "▾ Source Document Attribution"}</span>
+              {message.provenance && (
+                <span className="text-slate-400 font-mono">({message.provenance})</span>
+              )}
+            </button>
+            {showFactDetails && (
+              <div className="mt-2 space-y-1.5 rounded border border-slate-800 bg-slate-950/70 p-2.5 font-mono text-[11px] text-slate-300">
+                <div className="flex gap-2">
+                  <span className="text-slate-500 w-28">Source Document:</span>
+                  <span className="text-amber-300 font-semibold">{message.provenance || message.details?.source_display_name || "Knowledge"}</span>
+                </div>
+                {message.details?.chunk_id && (
+                  <div className="flex gap-2">
+                    <span className="text-slate-500 w-28">Chunk ID:</span>
+                    <span className="text-slate-200">{message.details.chunk_id}</span>
+                  </div>
+                )}
+                {message.details?.start_char !== undefined && message.details?.end_char !== undefined && (
+                  <div className="flex gap-2">
+                    <span className="text-slate-500 w-28">Offset Span:</span>
+                    <span className="text-slate-200">[{message.details.start_char} : {message.details.end_char}]</span>
+                  </div>
+                )}
+                {message.details?.score !== undefined && (
+                  <div className="flex gap-2">
+                    <span className="text-slate-500 w-28">BM25 Score:</span>
+                    <span className="text-slate-200 font-semibold">{message.details.score}</span>
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <span className="text-slate-500 w-28">Execution:</span>
+                  <span className="text-slate-300">
+                    {isDocumentExcerpt ? "Raw Document Passage (0 Model Calls)" : "Grounded Prompt Conditioning"}
+                  </span>
+                </div>
               </div>
             )}
           </div>

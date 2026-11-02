@@ -31,7 +31,16 @@ ORIGIN_NEURAL = "neural"
 ORIGIN_SAFE_CALCULATOR = "safe_calculator"
 ORIGIN_LOCAL_FACT = "local_fact"
 ORIGIN_TOOL_ERROR = "tool_error"
-VALID_ORIGINS = {ORIGIN_NEURAL, ORIGIN_SAFE_CALCULATOR, ORIGIN_LOCAL_FACT, ORIGIN_TOOL_ERROR}
+ORIGIN_DOCUMENT_EXCERPT = "document_excerpt"
+ORIGIN_GROUNDED_NEURAL = "grounded_neural"
+VALID_ORIGINS = {
+    ORIGIN_NEURAL,
+    ORIGIN_SAFE_CALCULATOR,
+    ORIGIN_LOCAL_FACT,
+    ORIGIN_TOOL_ERROR,
+    ORIGIN_DOCUMENT_EXCERPT,
+    ORIGIN_GROUNDED_NEURAL,
+}
 
 # Supported chat modes
 MODE_NATIVE = "native"
@@ -62,7 +71,7 @@ SUPPORTED_CAPITAL_COUNTRIES: Dict[str, str] = {
 }
 
 CAPITAL_QUERY_RE = re.compile(
-    r"\b(?:capital(?:\s+city)?|what(?:'s|\s+is)\s+(?:the\s+)?capital|which\s+city\s+is(?:\s+the)?\s+capital)\b",
+    r"\b(?:capitals?|what(?:'s|\s+is|\s+are)\s+(?:the\s+)?capitals?|which\s+(?:city\s+is|cities\s+are)(?:\s+the)?\s+capitals?)\b",
     re.IGNORECASE,
 )
 
@@ -218,19 +227,27 @@ class AssistantRouter:
                     if fid not in matched_country_fact_ids:
                         matched_country_fact_ids.append(fid)
 
-            # Multiple entities mentioned -> ambiguous query rejection
-            if len(matched_country_fact_ids) > 1:
+            # Multi-entity detection: plural "capitals" or conjunctions ("and", "or", ",", "&", "as well as")
+            is_plural = bool(re.search(r"\bcapitals\b", q_lower))
+            has_conjunction = bool(re.search(r"\b(?:and|or|as\s+well\s+as)\b|[,&]", q_lower))
+
+            # Multiple entities mentioned or conjunction present -> ambiguous query rejection
+            if len(matched_country_fact_ids) > 1 or (matched_country_fact_ids and (is_plural or has_conjunction)):
                 return AssistantRouteDecision(
                     origin=ORIGIN_LOCAL_FACT,
                     mode=MODE_ASSISTED,
                     model_generated=False,
                     is_terminal=True,
-                    answer_text="The query mentions multiple countries. Local fact retrieval requires an unambiguous single-country question.",
+                    answer_text="The query mentions multiple countries or asks for multiple capitals. Local fact retrieval requires an unambiguous single-country question.",
                     tool_name="LocalFactRetriever",
                     fact_id=None,
                     provenance="curated_groundup_facts_v1",
                     error_code="ambiguous_query",
-                    details={"matched_entities_count": len(matched_country_fact_ids)},
+                    details={
+                        "matched_entities_count": len(matched_country_fact_ids),
+                        "is_plural": is_plural,
+                        "has_conjunction": has_conjunction,
+                    },
                 )
 
             # Exactly one supported country matched

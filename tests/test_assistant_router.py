@@ -150,6 +150,23 @@ def test_prevent_cross_entity_and_relation_mismatches(router: AssistantRouter):
     assert dec_multi.fact_id is None
     assert dec_multi.error_code == "ambiguous_query"
 
+    # Multi-country queries where only one country is supported (regression test)
+    dec_multi_unsupported = router.classify_and_route("What are the capitals of France and Norway?", mode=MODE_ASSISTED)
+    assert dec_multi_unsupported.origin == ORIGIN_LOCAL_FACT
+    assert dec_multi_unsupported.fact_id is None
+    assert dec_multi_unsupported.error_code == "ambiguous_query"
+    assert "Paris" not in (dec_multi_unsupported.answer_text or "")
+
+    dec_multi_atlantis = router.classify_and_route("What are the capitals of Japan and Atlantis?", mode=MODE_ASSISTED)
+    assert dec_multi_atlantis.origin == ORIGIN_LOCAL_FACT
+    assert dec_multi_atlantis.fact_id is None
+    assert dec_multi_atlantis.error_code == "ambiguous_query"
+    assert "Tokyo" not in (dec_multi_atlantis.answer_text or "")
+
+    dec_comma = router.classify_and_route("What is the capital of Japan, Canada?", mode=MODE_ASSISTED)
+    assert dec_comma.origin == ORIGIN_LOCAL_FACT
+    assert dec_comma.error_code == "ambiguous_query"
+
 
 def test_science_and_biology_facts(router: AssistantRouter):
     """Test curated science and biology lookups."""

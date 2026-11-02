@@ -1,6 +1,6 @@
 """Pydantic data models for API request and response serialization."""
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 from backend.config import get_settings
@@ -183,12 +183,28 @@ class AssistantRequest(BaseModel):
         le=5.0,
         description="Optional repetition penalty factor for neural sampling.",
     )
+    knowledge_mode: str = Field(
+        default="off",
+        description="Knowledge retrieval mode: 'off' (default), 'evidence' (return matching passage directly, 0 model calls), or 'grounded' (ground neural model on matching passage).",
+    )
+    knowledge_session_id: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description="Optional session ID for user-ingested knowledge documents.",
+    )
 
     @field_validator("mode")
     @classmethod
     def validate_mode(cls, v: str) -> str:
         if v not in ("native", "assisted"):
             raise ValueError(f"Invalid mode '{v}'. Must be either 'native' or 'assisted'.")
+        return v
+
+    @field_validator("knowledge_mode")
+    @classmethod
+    def validate_knowledge_mode(cls, v: str) -> str:
+        if v not in ("off", "evidence", "grounded"):
+            raise ValueError(f"Invalid knowledge_mode '{v}'. Must be 'off', 'evidence', or 'grounded'.")
         return v
 
 
@@ -199,7 +215,7 @@ class AssistantResponse(BaseModel):
     mode: str = Field(..., description="Active execution mode: 'native' or 'assisted'.")
     origin: str = Field(
         ...,
-        description="Execution origin: 'neural', 'safe_calculator', 'local_fact', or 'tool_error'.",
+        description="Execution origin: 'neural', 'safe_calculator', 'local_fact', 'tool_error', 'document_excerpt', or 'grounded_neural'.",
     )
     answer_text: str = Field(..., description="Returned assistant answer or generated text.")
     model_generated: bool = Field(
@@ -215,7 +231,7 @@ class AssistantResponse(BaseModel):
         default=None, description="Fact ID if answered from curated local facts."
     )
     provenance: Optional[str] = Field(
-        default=None, description="Provenance source of the factual record."
+        default=None, description="Provenance source of the factual record or document."
     )
     evaluated_expression: Optional[str] = Field(
         default=None, description="Parsed mathematical expression if evaluated by calculator."
@@ -242,5 +258,86 @@ class AssistantResponse(BaseModel):
     details: Optional[Dict[str, Any]] = Field(
         default=None, description="Additional structured provenance or tool evaluation details."
     )
+
+
+class KnowledgeSourceCreateRequest(BaseModel):
+    """Request payload to ingest a user document into an active knowledge session."""
+
+    session_id: str = Field(
+        default="default",
+        min_length=1,
+        max_length=64,
+        description="Session identifier to scope user documents.",
+    )
+    display_name: str = Field(
+        ...,
+        min_length=1,
+        max_length=120,
+        description="Human-readable filename or title for document attribution.",
+    )
+    content: str = Field(
+        ...,
+        min_length=1,
+        max_length=16384,
+        description="Document text content (max 16 KB UTF-8).",
+    )
+    source_type: str = Field(
+        default="pasted",
+        description="Source type: 'pasted', 'txt', or 'md'.",
+    )
+
+
+class KnowledgeSourceResponse(BaseModel):
+    """Metadata response representing an ingested user knowledge source."""
+
+    source_id: str
+    session_id: str
+    display_name: str
+    source_type: str
+    content_hash: str
+    character_count: int
+    token_count: int
+    chunk_count: int
+    created_at: str
+
+
+class KnowledgeRetrieveRequest(BaseModel):
+    """Parameters to search and retrieve relevant chunks from a knowledge session."""
+
+    session_id: str = Field(
+        default="default",
+        min_length=1,
+        max_length=64,
+        description="Session identifier where documents are stored.",
+    )
+    query: str = Field(
+        ...,
+        min_length=1,
+        max_length=1000,
+        description="Search query to match against knowledge chunks.",
+    )
+    top_k: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Maximum candidates to return.",
+    )
+
+
+class KnowledgeRetrieveResponse(BaseModel):
+    """Structured result from user knowledge retrieval."""
+
+    query: str
+    status: str
+    chunk_id: Optional[str] = None
+    source_id: Optional[str] = None
+    source_display_name: Optional[str] = None
+    text: Optional[str] = None
+    start_char: Optional[int] = None
+    end_char: Optional[int] = None
+    score: float
+    is_ambiguous: bool
+    candidates: List[Dict[str, Any]]
+    error_code: Optional[str] = None
 
 

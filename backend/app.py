@@ -9,7 +9,7 @@ import logging
 import queue
 import threading
 import time
-from typing import AsyncIterator
+from typing import Any, AsyncIterator, Dict, List, Optional
 import uuid
 
 from fastapi import FastAPI, HTTPException, Request, status
@@ -25,6 +25,8 @@ from backend.assistant_router import (
     ORIGIN_SAFE_CALCULATOR,
     ORIGIN_LOCAL_FACT,
     ORIGIN_TOOL_ERROR,
+    ORIGIN_DOCUMENT_EXCERPT,
+    ORIGIN_GROUNDED_NEURAL,
 )
 from backend.config import (
     get_settings,
@@ -41,8 +43,14 @@ from backend.schemas import (
     HealthResponse,
     LoadModelRequest,
     ModelInfoResponse,
+    KnowledgeSourceCreateRequest,
+    KnowledgeSourceResponse,
+    KnowledgeRetrieveRequest,
+    KnowledgeRetrieveResponse,
 )
 from src.generation import GenerationConfig
+from src.user_knowledge import knowledge_store
+from src.user_knowledge_retrieval import UserKnowledgeRetriever
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -505,12 +513,55 @@ async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
             detail=f"Invalid mode '{request.mode}'. Must be strictly 'native' or 'assisted'.",
         )
 
-    # 2. Run deterministic router classification
+    # 2. Knowledge Evidence Mode (0 model calls)
+    if request.knowledge_mode == "evidence":
+        session = knowledge_store.get_or_create_session(request.knowledge_session_id or "default")
+        retriever = UserKnowledgeRetriever.from_session(session)
+        k_res = retriever.retrieve(request.prompt)
+        elapsed = time.perf_counter() - start_time
+        if k_res.status == "relevant_passage" and k_res.chunk:
+            ans_text = k_res.chunk.text
+            err = None
+        else:
+            ans_text = f"No unambiguous evidence passage found in active knowledge documents (status: {k_res.status})."
+            err = k_res.error_code or k_res.status
+
+        return AssistantResponse(
+            request_id=req_id,
+            mode=request.mode,
+            origin=ORIGIN_DOCUMENT_EXCERPT,
+            answer_text=ans_text,
+            model_generated=False,
+            model_profile=None,
+            tool_name="UserKnowledgeRetriever",
+            fact_id=None,
+            provenance=k_res.source_display_name,
+            evaluated_expression=None,
+            stop_reason="tool_complete",
+            prompt_tokens=0,
+            generated_tokens=0,
+            total_tokens=0,
+            elapsed_time_sec=round(elapsed, 4),
+            tokens_per_second=0.0,
+            error_code=err,
+            details={
+                "source_id": k_res.source_id,
+                "source_display_name": k_res.source_display_name,
+                "chunk_id": k_res.chunk.chunk_id if k_res.chunk else None,
+                "start_char": k_res.chunk.start_char if k_res.chunk else None,
+                "end_char": k_res.chunk.end_char if k_res.chunk else None,
+                "score": k_res.score,
+                "status": k_res.status,
+                "candidates": k_res.candidates,
+            },
+        )
+
+    # 3. Run deterministic router classification (unless grounded knowledge is active and terminal router is not arithmetic)
     decision = assistant_router.classify_and_route(request.prompt, mode=request.mode)
 
-    # 3. If decision is terminal (safe_calculator, local_fact, or tool_error):
+    # If decision is terminal (safe_calculator, local_fact, or tool_error):
     # ZERO model calls! No model lock acquired!
-    if decision.is_terminal:
+    if decision.is_terminal and request.knowledge_mode != "grounded":
         elapsed = time.perf_counter() - start_time
         return AssistantResponse(
             request_id=req_id,
@@ -533,7 +584,31 @@ async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
             details=decision.details,
         )
 
-    # 4. Neural generation fallback path
+    # If arithmetic was identified, calculator always takes terminal precedence even in grounded mode
+    if decision.is_terminal and decision.origin == ORIGIN_SAFE_CALCULATOR:
+        elapsed = time.perf_counter() - start_time
+        return AssistantResponse(
+            request_id=req_id,
+            mode=request.mode,
+            origin=decision.origin,
+            answer_text=decision.answer_text or "",
+            model_generated=False,
+            model_profile=None,
+            tool_name=decision.tool_name,
+            fact_id=decision.fact_id,
+            provenance=decision.provenance,
+            evaluated_expression=decision.evaluated_expression,
+            stop_reason="tool_complete",
+            prompt_tokens=0,
+            generated_tokens=0,
+            total_tokens=0,
+            elapsed_time_sec=round(elapsed, 4),
+            tokens_per_second=0.0,
+            error_code=decision.error_code,
+            details=decision.details,
+        )
+
+    # 4. Neural generation path (Native, Fallback, or Grounded)
     if not model_manager.is_loaded or model_manager.generator is None or model_manager.model is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -542,9 +617,42 @@ async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
 
     is_sft = bool(model_manager.model_info and getattr(model_manager.model_info, "is_sft", False))
 
+    grounded_chunk = None
+    retrieval_details = None
+    if request.knowledge_mode == "grounded":
+        session = knowledge_store.get_or_create_session(request.knowledge_session_id or "default")
+        retriever = UserKnowledgeRetriever.from_session(session)
+        k_res = retriever.retrieve(request.prompt)
+        if k_res.status == "relevant_passage" and k_res.chunk:
+            grounded_chunk = k_res.chunk
+            retrieval_details = {
+                "source_id": k_res.source_id,
+                "source_display_name": k_res.source_display_name,
+                "chunk_id": k_res.chunk.chunk_id,
+                "start_char": k_res.chunk.start_char,
+                "end_char": k_res.chunk.end_char,
+                "score": k_res.score,
+                "status": k_res.status,
+                "candidates": k_res.candidates,
+            }
+
+    context_str = grounded_chunk.text if grounded_chunk else None
+
     if is_sft:
         from src.generation import format_sft_prompt
-        prompt_to_run = format_sft_prompt(request.prompt)
+        if context_str:
+            prompt_to_run = format_sft_prompt(request.prompt, context=context_str)
+            try:
+                tok_ids = model_manager.generator.tokenizer.encode(prompt_to_run)
+                # Budget check: keep prompt + context <= 190 to allow >= 66 tokens for generation
+                while len(tok_ids) > 190 and len(context_str) > 30:
+                    context_str = context_str[: int(len(context_str) * 0.8)].rstrip()
+                    prompt_to_run = format_sft_prompt(request.prompt, context=context_str)
+                    tok_ids = model_manager.generator.tokenizer.encode(prompt_to_run)
+            except Exception:
+                pass
+        else:
+            prompt_to_run = format_sft_prompt(request.prompt)
     else:
         prompt_to_run = request.prompt
 
@@ -582,7 +690,12 @@ async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
             model_manager.inference_call_count += 1
             if is_sft:
                 from src.generation import generate_sft_response
-                res = generate_sft_response(model_manager.generator, prompt=request.prompt, config=config)
+                res = generate_sft_response(
+                    model_manager.generator,
+                    prompt=request.prompt,
+                    context=context_str,
+                    config=config,
+                )
             else:
                 res = model_manager.generator.generate(prompt=request.prompt, config=config)
             model_manager.tokens_generated_count += res.generated_tokens
@@ -622,16 +735,20 @@ async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
         model_manager.model_info.profile_name if model_manager.model_info else "GroundUpGPT"
     )
 
+    final_origin = ORIGIN_GROUNDED_NEURAL if grounded_chunk else ORIGIN_NEURAL
+    final_tool_name = "UserKnowledgeRetriever" if grounded_chunk else None
+    final_provenance = retrieval_details.get("source_display_name") if retrieval_details else None
+
     return AssistantResponse(
         request_id=req_id,
         mode=request.mode,
-        origin=ORIGIN_NEURAL,
+        origin=final_origin,
         answer_text=res.generated_text,
         model_generated=True,
         model_profile=active_profile,
-        tool_name=None,
+        tool_name=final_tool_name,
         fact_id=None,
-        provenance=None,
+        provenance=final_provenance,
         evaluated_expression=None,
         stop_reason=getattr(res, "stop_reason", None) or "max_new_tokens",
         prompt_tokens=res.prompt_tokens,
@@ -640,7 +757,7 @@ async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
         elapsed_time_sec=round(res.elapsed_time_sec, 4),
         tokens_per_second=round(tok_per_sec, 2),
         error_code=None,
-        details=None,
+        details=retrieval_details,
     )
 
 
@@ -660,12 +777,83 @@ async def assistant_stream(
             detail=f"Invalid mode '{request.mode}'. Must be strictly 'native' or 'assisted'.",
         )
 
-    # 2. Run deterministic router classification
+    # 2. Knowledge Evidence Mode (0 model calls)
+    if request.knowledge_mode == "evidence":
+        session = knowledge_store.get_or_create_session(request.knowledge_session_id or "default")
+        retriever = UserKnowledgeRetriever.from_session(session)
+        k_res = retriever.retrieve(request.prompt)
+        elapsed = time.perf_counter() - start_time
+        if k_res.status == "relevant_passage" and k_res.chunk:
+            ans_text = k_res.chunk.text
+            err = None
+        else:
+            ans_text = f"No unambiguous evidence passage found in active knowledge documents (status: {k_res.status})."
+            err = k_res.error_code or k_res.status
+
+        async def evidence_stream() -> AsyncIterator[str]:
+            payload = json.dumps({
+                "request_id": req_id,
+                "mode": request.mode,
+                "origin": ORIGIN_DOCUMENT_EXCERPT,
+                "answer_text": ans_text,
+                "model_generated": False,
+                "model_profile": None,
+                "tool_name": "UserKnowledgeRetriever",
+                "fact_id": None,
+                "provenance": k_res.source_display_name,
+                "evaluated_expression": None,
+                "stop_reason": "tool_complete",
+                "prompt_tokens": 0,
+                "generated_tokens": 0,
+                "total_tokens": 0,
+                "elapsed_time_sec": round(elapsed, 4),
+                "tokens_per_second": 0.0,
+                "error_code": err,
+                "details": {
+                    "source_id": k_res.source_id,
+                    "source_display_name": k_res.source_display_name,
+                    "chunk_id": k_res.chunk.chunk_id if k_res.chunk else None,
+                    "start_char": k_res.chunk.start_char if k_res.chunk else None,
+                    "end_char": k_res.chunk.end_char if k_res.chunk else None,
+                    "score": k_res.score,
+                    "status": k_res.status,
+                    "candidates": k_res.candidates,
+                },
+            })
+            yield f"event: tool_result\ndata: {payload}\n\n"
+            done_payload = json.dumps({
+                "request_id": req_id,
+                "mode": request.mode,
+                "origin": ORIGIN_DOCUMENT_EXCERPT,
+                "model_generated": False,
+                "prompt_tokens": 0,
+                "generated_tokens": 0,
+                "total_tokens": 0,
+                "active_context_tokens": 0,
+                "context_limit": 256,
+                "context_cropped": False,
+                "elapsed_time_sec": round(elapsed, 4),
+                "tokens_per_second": 0.0,
+                "stop_reason": "tool_complete",
+            })
+            yield f"event: done\ndata: {done_payload}\n\n"
+
+        return StreamingResponse(
+            evidence_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    # 3. Run deterministic router classification
     decision = assistant_router.classify_and_route(request.prompt, mode=request.mode)
 
-    # 3. If decision is terminal:
+    # If decision is terminal:
     # ZERO model calls! No model lock acquired!
-    if decision.is_terminal:
+    if decision.is_terminal and (request.knowledge_mode != "grounded" or decision.origin == ORIGIN_SAFE_CALCULATOR):
         async def tool_event_stream() -> AsyncIterator[str]:
             elapsed = time.perf_counter() - start_time
             tool_payload = json.dumps({
@@ -717,7 +905,7 @@ async def assistant_stream(
             },
         )
 
-    # 4. Neural generation streaming path
+    # 4. Neural generation streaming path (Native or Grounded)
     if not model_manager.is_loaded or model_manager.generator is None or model_manager.model is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -726,9 +914,41 @@ async def assistant_stream(
 
     is_sft = bool(model_manager.model_info and getattr(model_manager.model_info, "is_sft", False))
 
+    grounded_chunk = None
+    retrieval_details = None
+    if request.knowledge_mode == "grounded":
+        session = knowledge_store.get_or_create_session(request.knowledge_session_id or "default")
+        retriever = UserKnowledgeRetriever.from_session(session)
+        k_res = retriever.retrieve(request.prompt)
+        if k_res.status == "relevant_passage" and k_res.chunk:
+            grounded_chunk = k_res.chunk
+            retrieval_details = {
+                "source_id": k_res.source_id,
+                "source_display_name": k_res.source_display_name,
+                "chunk_id": k_res.chunk.chunk_id,
+                "start_char": k_res.chunk.start_char,
+                "end_char": k_res.chunk.end_char,
+                "score": k_res.score,
+                "status": k_res.status,
+                "candidates": k_res.candidates,
+            }
+
+    context_str = grounded_chunk.text if grounded_chunk else None
+
     if is_sft:
         from src.generation import format_sft_prompt
-        prompt_to_run = format_sft_prompt(request.prompt)
+        if context_str:
+            prompt_to_run = format_sft_prompt(request.prompt, context=context_str)
+            try:
+                tok_ids = model_manager.generator.tokenizer.encode(prompt_to_run)
+                while len(tok_ids) > 190 and len(context_str) > 30:
+                    context_str = context_str[: int(len(context_str) * 0.8)].rstrip()
+                    prompt_to_run = format_sft_prompt(request.prompt, context=context_str)
+                    tok_ids = model_manager.generator.tokenizer.encode(prompt_to_run)
+            except Exception:
+                pass
+        else:
+            prompt_to_run = format_sft_prompt(request.prompt)
         stop_seqs = ["<|endoftext|>", "<|user|>", "<|assistant|>"]
     else:
         prompt_to_run = request.prompt
@@ -873,12 +1093,18 @@ async def assistant_stream(
                 else 0.0
             )
 
+            final_origin = ORIGIN_GROUNDED_NEURAL if grounded_chunk else ORIGIN_NEURAL
+            final_tool_name = "UserKnowledgeRetriever" if grounded_chunk else None
+            final_provenance = retrieval_details.get("source_display_name") if retrieval_details else None
+
             done_payload = json.dumps({
                 "request_id": req_id,
                 "mode": request.mode,
-                "origin": ORIGIN_NEURAL,
+                "origin": final_origin,
                 "model_generated": True,
                 "model_profile": active_profile,
+                "tool_name": final_tool_name,
+                "provenance": final_provenance,
                 "prompt_tokens": prompt_tokens_count,
                 "generated_tokens": generated_tokens_count,
                 "total_tokens": total_tokens,
@@ -888,6 +1114,7 @@ async def assistant_stream(
                 "elapsed_time_sec": round(elapsed_time, 4),
                 "tokens_per_second": round(tokens_per_sec, 2),
                 "stop_reason": stream_stop_reason,
+                "details": retrieval_details,
             })
             yield f"event: done\ndata: {done_payload}\n\n"
 
@@ -904,5 +1131,98 @@ async def assistant_stream(
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+# ---------------------------------------------------------------------------
+# User Knowledge Endpoints (Ingestion, Retrieval, Management)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/knowledge/source", response_model=KnowledgeSourceResponse, tags=["Knowledge"])
+async def create_knowledge_source(request: KnowledgeSourceCreateRequest) -> KnowledgeSourceResponse:
+    """Ingest a user-provided text document or pasted knowledge excerpt."""
+    try:
+        source = knowledge_store.add_source(
+            session_id=request.session_id,
+            display_name=request.display_name,
+            content=request.content,
+            source_type=request.source_type,
+        )
+        return KnowledgeSourceResponse(
+            source_id=source.source_id,
+            session_id=source.session_id,
+            display_name=source.display_name,
+            source_type=source.source_type,
+            content_hash=source.content_hash,
+            character_count=source.character_count,
+            token_count=source.token_count,
+            chunk_count=len(source.chunks),
+            created_at=source.created_at,
+        )
+    except ValueError as val_err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(val_err),
+        )
+
+
+@app.get("/api/knowledge/sources", response_model=List[KnowledgeSourceResponse], tags=["Knowledge"])
+async def list_knowledge_sources(session_id: str = "default") -> List[KnowledgeSourceResponse]:
+    """List all ingested documents in the specified knowledge session."""
+    sources = knowledge_store.list_sources(session_id)
+    return [
+        KnowledgeSourceResponse(
+            source_id=s.source_id,
+            session_id=s.session_id,
+            display_name=s.display_name,
+            source_type=s.source_type,
+            content_hash=s.content_hash,
+            character_count=s.character_count,
+            token_count=s.token_count,
+            chunk_count=len(s.chunks),
+            created_at=s.created_at,
+        )
+        for s in sources
+    ]
+
+
+@app.delete("/api/knowledge/source/{source_id}", tags=["Knowledge"])
+async def delete_knowledge_source(source_id: str, session_id: str = "default") -> dict:
+    """Delete a single document from the active session by ID."""
+    deleted = knowledge_store.delete_source(session_id, source_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Source '{source_id}' not found in session '{session_id}'.",
+        )
+    return {"success": True, "deleted_source_id": source_id}
+
+
+@app.delete("/api/knowledge/sources", tags=["Knowledge"])
+async def clear_knowledge_sources(session_id: str = "default") -> dict:
+    """Clear all documents from the active session."""
+    knowledge_store.clear_session(session_id)
+    return {"success": True, "session_id": session_id}
+
+
+@app.post("/api/knowledge/retrieve", response_model=KnowledgeRetrieveResponse, tags=["Knowledge"])
+async def retrieve_knowledge(request: KnowledgeRetrieveRequest) -> KnowledgeRetrieveResponse:
+    """Retrieve relevant chunks from session documents using BM25."""
+    session = knowledge_store.get_or_create_session(request.session_id)
+    retriever = UserKnowledgeRetriever.from_session(session)
+    res = retriever.retrieve(request.query, top_k=request.top_k)
+    return KnowledgeRetrieveResponse(
+        query=res.query,
+        status=res.status,
+        chunk_id=res.chunk.chunk_id if res.chunk else None,
+        source_id=res.chunk.source_id if res.chunk else None,
+        source_display_name=res.source_display_name,
+        text=res.chunk.text if res.chunk else None,
+        start_char=res.chunk.start_char if res.chunk else None,
+        end_char=res.chunk.end_char if res.chunk else None,
+        score=res.score,
+        is_ambiguous=res.is_ambiguous,
+        candidates=res.candidates,
+        error_code=res.error_code,
     )
 
