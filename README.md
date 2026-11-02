@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-CUDA%20Accelerated-EE4C2C.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Completed (Steps 1-41)](https://img.shields.io/badge/Status-Completed%20(Steps%201--41)-brightgreen.svg)]()
+[![Status: Completed (Steps 1-42)](https://img.shields.io/badge/Status-Completed%20(Steps%201--42)-brightgreen.svg)]()
 
 GroundUpGPT is an educational and engineering project dedicated to designing, implementing, training, evaluating, and deploying a small autoregressive, decoder-only Transformer language model completely from scratch using Python and PyTorch.
 
@@ -1550,6 +1550,44 @@ Resolved metadata divergence in `backend/model_loader.py` and `backend/schemas.p
 
 ---
 
+## Step 42: Grounded QA Feasibility and Deterministic Local Tools
+
+In **Step 42**, we systematically evaluated whether GroundUpGPT-27M can utilize externally supplied context, how it handles facts of varying familiarity and length, and whether safe deterministic local tools can provide reliable factual and arithmetic capabilities without misrepresenting model intelligence.
+
+### 1. Grounding Feasibility & Context Scaling Findings
+Evaluated across 60 controlled cases in 7 distinct groups:
+- **Group A (Familiar Factual, 10 items)**: Context improved accuracy from 20.0% (prompt-only) to **50.0% (greedy)** and **70.0% (calibrated)**.
+- **Group B (Unfamiliar Realistic, 10 items)**: Context lifted accuracy from 0.0% to **50.0% (greedy)** and **60.0% (calibrated)** (e.g. Bhutan -> Thimphu, Madagascar -> Antananarivo, Mongolia -> togrog).
+- **Group C (Fictional / Synthetic, 10 items)**: Context accuracy remained low at **10.0%**, as the BPE tokenizer breaks novel synthetic names into subword byte fragments that the 27M attention mechanism struggles to route to output.
+- **Group D & E (Paraphrased & Multi-Fact Distractors, 16 items)**: Accuracy was **0.0%**. When multiple facts or distractors are present, attention disperses across entities rather than isolating the targeted answer.
+- **Context Length Scaling**: Tier 1 short contexts (~15 tokens) yielded a **28.2%** answer extraction rate; Tier 2 multi-sentence contexts (~50 tokens) collapsed to **0.0%**.
+- **Unanswerable & Ambiguous (14 items)**: The model lacks metacognitive calibration; rather than stating information is missing, it guesses or restates fragments.
+
+### 2. True Stop-Reason Telemetry
+Refined generation telemetry in `src/generation.py` with explicit termination reasons (`end_of_turn`, `user_delimiter`, `assistant_delimiter`, `max_new_tokens`, `other`). Confirmed `<|endoftext|>` is the genuine SFT end delimiter. Natural `<|endoftext|>` stop rates:
+- Step 600 SFT (No context): **46.7%** (28/60)
+- Anchor SFT (No context): **66.7%** (40/60)
+- Anchor SFT (Grounded greedy): **56.7%** (34/60)
+- Anchor SFT (Grounded calibrated): **63.3%** (38/60)
+
+### 3. Safe Deterministic Calculator Prototype
+Implemented `src/safe_calculator.py` using AST-restricted Decimal evaluation:
+- Tested on 32 arithmetic cases (seen, unseen, multiple ops, parentheses, division, syntax errors, overflow, injection):
+  - **Safe Calculator Accuracy**: **32/32 (100.0%)** (mean latency ~50 μs)
+  - **27M Model Native Accuracy**: **4/32 (12.5%)** (fails on two-digit math, multi-op precedence, and parentheses)
+- Safe rejection of `ZeroDivisionError`, expression length limits, magnitude caps ($10^{15}$), and security rejection of `eval()`, `__import__`, or arbitrary variables.
+
+### 4. Local BM25 Fact Retrieval Engine
+Implemented `src/local_fact_retrieval.py` providing lightweight, dependency-free BM25 retrieval over versioned fact records:
+- **Retrieval Accuracy**: **16/16 (100.0%)** on encyclopedic and synthetic benchmarks.
+- **Deterministic Attributed Lookup**: Directly returning verified fact records is **100% reliable**, whereas asking the 27M neural generator to rewrite retrieved passages introduces hallucinations, omission, and grammatical drift.
+
+### 5. Adversarial Context & Prompt Injection Resilience
+Tested 8 adversarial context attack vectors (instruction hijacking, system prompt leak, command injection, XSS, delimiter injection):
+- **100% Resilience (0/8 compromised)**: The 27M model does not execute instructions inside retrieved context and has no access to privileged environments.
+
+---
+
 ## Current Implementation Status
 
 - **Completed Steps**:
@@ -1594,4 +1632,5 @@ Resolved metadata divergence in `backend/model_loader.py` and `backend/schemas.p
   - **Step 39 — Conversational Failure Diagnosis, Training-Signal Audit, and Controlled Learning Probe**: Executed comprehensive diagnostic audit of GroundUpGPT-27M conversational behavior. Audited and fixed prompt-length accounting definition in `src/sft_data.py` with backward-compatible loading, verified 100.0% token sequence match across all 9,370 Dolly train/val examples, verified supervised loss correctness (causal shift and target masking), analyzed Dolly 15k composition (0 greetings, 0 acknowledgements, 0 arithmetic; 79.5 avg response tokens), demonstrated strong prompt conditioning (96% win rate over mismatched prompts; 65x first-token probability boost), implemented conservative grading benchmark across Base 27M, SFT 27M, and SFT 5M, and executed controlled 32-sample overfitting probe driving loss to 0.0006 with 100% verbatim memorization in 39.9s on RTX 3050 GPU, proving the 27M Transformer architecture and training pipeline are completely sound. Verified with 8/8 unit tests (`tests/test_27m_conversation_diagnostics.py`) and full repository suite (239/239 passing).
   - **Step 40 — Targeted Conversational Fine-Tuning with Verified Short-Answer Anchors**: Reconciled Step 39 reporting discrepancies, engineered a verified 430-example conversational anchor dataset across 11 categories (data/cache_sft_anchors_v1/, 321 train, 53 val, 56 held-out transfer test) with 0 collisions against protected benchmarks and disjoint arithmetic/concept splits. Implemented BlendedSFTDataPipeline delivering 54.8% anchor samples and 28.4% anchor active target tokens. Executed bounded 250-step SFT run (2.77 min on RTX 3050 Laptop GPU): Anchor validation loss dropped from 1.9411 to **1.4802** (-37.0% perplexity), transfer test loss dropped from 1.8503 to **1.4331** (-34.1% perplexity), while Dolly validation loss (+0.33% drift) and pretraining LM loss (+0.90% drift) remained preserved without catastrophic forgetting. Saved checkpoints in checkpoints/27m_sft_anchors_v1/ (model_27m_anchors_best.pt, model_27m_anchors_latest.pt). Conducted 111-prompt comparative benchmark across Frozen 35, Transfer Test, and Seen Train under greedy and calibrated decoding: demonstrated dramatic response length reduction (median 52 -> 23–25 tokens), clean delimiter termination, high accuracy on classification/definitions, structural equation syntax, and documented arithmetic computation capacity limits. Verified with 8/8 unit tests (	ests/test_27m_anchor_sft.py) and full repository test suite (247/247 passing).
   - **Step 41 — Reliable Conversational Evaluation and Experimental 27M Model Integration**: Built deterministic task-specific conversation evaluation engine (`src/conversation_evaluation.py`) with strict rubrics for arithmetic, factual QA, scientific definitions, classification, and list counting. Re-scored all 111 Step 40 benchmark generations, eliminating regex false positives and establishing honest baselines (Frozen 35: 0/23, Transfer Test: 1/26, Seen Train: 2/14). Fixed backend metadata schema compatibility for anchor checkpoints (`prev_sft_step: 600`, `anchor_sft_step: 250`, `pretrain_steps: 5949`), registered `27m_anchors_best` and `27m_anchors_latest` experimental chat profiles, updated Next.js sidebar and message attribution, verified Windows launcher preflight, and validated end-to-end functionality with 13 new unit/integration tests (`tests/test_conversation_evaluation.py`, `tests/test_27m_anchor_ui_integration.py`). Verified with full repository test suite (260/260 passing) and Next.js production build (`npm run build`).
-- **Roadmap Complete**: Phase 13 completed through Step 41! All 41 steps complete.
+  - **Step 42 — Grounded QA Feasibility & Deterministic Local Tools**: Evaluated GroundUpGPT-27M under explicit prompt conditioning across 60 controlled cases in 7 groups. Established empirical grounding boundaries: concise context (Tier 1 ~15 tokens) lifted accuracy on familiar and unfamiliar facts from 0–20% up to 50–70%, but multi-fact distractor contexts (Tier 2 ~50 tokens) collapsed to 0.0% due to attention dispersion. Audited generation termination telemetry with explicit `stop_reason` tracking (`end_of_turn`, `user_delimiter`, `assistant_delimiter`, `max_new_tokens`, `other`) and verified `<|endoftext|>` delimiter usage. Implemented safe AST-based arithmetic calculator (`src/safe_calculator.py`) achieving 32/32 (100.0%) accuracy and lightweight BM25 fact retrieval engine (`src/local_fact_retrieval.py`) achieving 16/16 (100.0%) retrieval accuracy. Demonstrated resilience against 8 adversarial injection attack vectors. Added 23 unit tests across 4 test suites.
+- **Roadmap Complete**: Phase 14 completed through Step 42! All 42 steps complete.

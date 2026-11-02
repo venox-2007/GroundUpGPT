@@ -266,6 +266,7 @@ async def generate_text(request: GenerateRequest, raw_request: Request) -> Gener
         context_cropped=result.context_cropped,
         elapsed_time_sec=round(result.elapsed_time_sec, 4),
         tokens_per_second=round(result.tokens_per_second, 2),
+        stop_reason=getattr(result, "stop_reason", None),
     )
 
 
@@ -323,6 +324,7 @@ async def generate_text_stream(
 
     async def sse_event_stream() -> AsyncIterator[str]:
         generated_tokens_count = 0
+        stream_stop_reason = "max_new_tokens"
         start_time = time.perf_counter()
         sync_queue: queue.Queue = queue.Queue(maxsize=16)
         cancel_event = threading.Event()
@@ -389,6 +391,8 @@ async def generate_text_stream(
                         if msg_type == "token":
                             chunk = payload
                             generated_tokens_count += 1
+                            if chunk.stop_reason:
+                                stream_stop_reason = chunk.stop_reason
                             token_payload = json.dumps(
                                 {
                                     "token_id": chunk.token_id,
@@ -445,6 +449,7 @@ async def generate_text_stream(
                     "context_cropped": context_cropped,
                     "elapsed_time_sec": round(elapsed_time, 4),
                     "tokens_per_second": round(tokens_per_sec, 2),
+                    "stop_reason": stream_stop_reason,
                 }
             )
             yield f"event: done\ndata: {done_payload}\n\n"

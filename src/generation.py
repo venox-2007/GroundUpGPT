@@ -65,12 +65,15 @@ class StreamChunk:
         text_chunk: Decoded text representation for this token (or empty if buffering multi-byte bytes).
         step: Zero-indexed generation step counter.
         is_finished: Boolean flag indicating if generation completed with this chunk.
+        stop_reason: Optional reason string when finished ("end_of_turn", "user_delimiter",
+                     "assistant_delimiter", "max_new_tokens", "other").
     """
 
     token_id: int
     text_chunk: str
     step: int
     is_finished: bool
+    stop_reason: Optional[str] = None
 
 
 @dataclass
@@ -92,6 +95,8 @@ class GenerationResult:
         active_context_tokens: Number of tokens currently in the active attention window.
         context_limit: The model's maximum context length (block_size).
         context_cropped: Whether sequence length exceeded block_size and older tokens were cropped.
+        stop_reason: Reason why generation completed ("end_of_turn", "user_delimiter",
+                     "assistant_delimiter", "max_new_tokens", "other").
     """
 
     prompt: str
@@ -108,6 +113,7 @@ class GenerationResult:
     active_context_tokens: int = 0
     context_limit: int = 0
     context_cropped: bool = False
+    stop_reason: str = "max_new_tokens"
 
 
 def find_longest_stop_prefix_len(text: str, stop_sequences: Sequence[str]) -> int:
@@ -380,20 +386,31 @@ class TextGenerator:
                 # 6. Check Stop Sequences & Prefix Buffering
                 stopped = False
                 emit_chunk = ""
+                chunk_stop_reason: Optional[str] = None
 
                 if cfg.stop_sequences:
                     # 6a. Check for full stop sequence match
                     earliest_idx = None
+                    matched_stop_seq = None
                     for stop_seq in cfg.stop_sequences:
                         idx_match = pending_buffer.find(stop_seq)
                         if idx_match != -1:
                             if earliest_idx is None or idx_match < earliest_idx:
                                 earliest_idx = idx_match
+                                matched_stop_seq = stop_seq
 
                     if earliest_idx is not None:
                         stopped = True
                         emit_chunk = pending_buffer[:earliest_idx]
                         pending_buffer = ""
+                        if matched_stop_seq == "<|endoftext|>":
+                            chunk_stop_reason = "end_of_turn"
+                        elif matched_stop_seq == "<|user|>":
+                            chunk_stop_reason = "user_delimiter"
+                        elif matched_stop_seq == "<|assistant|>":
+                            chunk_stop_reason = "assistant_delimiter"
+                        else:
+                            chunk_stop_reason = "other"
                     else:
                         # 6b. Check for partial prefix match at end of buffer
                         k = find_longest_stop_prefix_len(pending_buffer, cfg.stop_sequences)
@@ -411,17 +428,23 @@ class TextGenerator:
                             if not is_stop_prefix:
                                 emit_chunk += pending_buffer
                             pending_buffer = ""
+                            chunk_stop_reason = "max_new_tokens"
                 else:
                     emit_chunk = pending_buffer
                     pending_buffer = ""
+                    if is_last_step:
+                        chunk_stop_reason = "max_new_tokens"
 
                 is_finished = is_last_step or stopped
+                if is_finished and chunk_stop_reason is None:
+                    chunk_stop_reason = "max_new_tokens"
 
                 yield StreamChunk(
                     token_id=next_token_id,
                     text_chunk=emit_chunk,
                     step=step,
                     is_finished=is_finished,
+                    stop_reason=chunk_stop_reason,
                 )
 
                 if stopped:
@@ -475,10 +498,13 @@ class TextGenerator:
         start_time = time.perf_counter()
         generated_ids: List[int] = []
         streamed_chunks: List[str] = []
+        gen_stop_reason = "max_new_tokens"
 
         for chunk in self.generate_stream(prompt=prompt, config=cfg):
             generated_ids.append(chunk.token_id)
             streamed_chunks.append(chunk.text_chunk)
+            if chunk.stop_reason is not None:
+                gen_stop_reason = chunk.stop_reason
 
         elapsed_time = time.perf_counter() - start_time
         all_ids = prompt_ids + generated_ids
@@ -522,6 +548,7 @@ class TextGenerator:
             active_context_tokens=active_context_tokens,
             context_limit=block_size,
             context_cropped=context_cropped,
+            stop_reason=gen_stop_reason,
         )
 
 

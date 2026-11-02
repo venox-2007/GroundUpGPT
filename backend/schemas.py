@@ -66,6 +66,7 @@ class GenerateResponse(BaseModel):
     context_cropped: bool
     elapsed_time_sec: float
     tokens_per_second: float
+    stop_reason: Optional[str] = None
 
 
 class ModelInfoResponse(BaseModel):
