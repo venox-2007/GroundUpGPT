@@ -148,7 +148,7 @@ class AssistantRequest(BaseModel):
     )
     mode: str = Field(
         default="native",
-        description="Active chat mode: 'native' (default neural GPT) or 'assisted' (opt-in tool-assisted).",
+        description="Active chat mode: 'native' (neural GPT), 'assisted' (tool-assisted), or 'auto' (automatic server-side routing).",
     )
     max_new_tokens: int = Field(
         default=50,
@@ -201,15 +201,15 @@ class AssistantRequest(BaseModel):
     @field_validator("mode")
     @classmethod
     def validate_mode(cls, v: str) -> str:
-        if v not in ("native", "assisted"):
-            raise ValueError(f"Invalid mode '{v}'. Must be either 'native' or 'assisted'.")
+        if v not in ("native", "assisted", "auto"):
+            raise ValueError(f"Invalid mode '{v}'. Must be 'native', 'assisted', or 'auto'.")
         return v
 
     @field_validator("knowledge_mode")
     @classmethod
     def validate_knowledge_mode(cls, v: str) -> str:
-        if v not in ("off", "evidence", "grounded"):
-            raise ValueError(f"Invalid knowledge_mode '{v}'. Must be 'off', 'evidence', or 'grounded'.")
+        if v not in ("off", "evidence", "grounded", "auto"):
+            raise ValueError(f"Invalid knowledge_mode '{v}'. Must be 'off', 'evidence', 'grounded', or 'auto'.")
         return v
 
 
@@ -217,7 +217,7 @@ class AssistantResponse(BaseModel):
     """Structured response from GroundUpGPT assistant router."""
 
     request_id: str = Field(..., description="Unique request tracking identifier.")
-    mode: str = Field(..., description="Active execution mode: 'native' or 'assisted'.")
+    mode: str = Field(..., description="Active execution mode: 'native', 'assisted', or 'auto'.")
     origin: str = Field(
         ...,
         description="Execution origin: 'neural', 'safe_calculator', 'local_fact', 'tool_error', 'document_excerpt', or 'grounded_neural'.",
@@ -311,6 +311,7 @@ class KnowledgeSourceResponse(BaseModel):
     token_count: int
     chunk_count: int
     created_at: str
+    warning: Optional[str] = None
 
 
 class KnowledgeRetrieveRequest(BaseModel):

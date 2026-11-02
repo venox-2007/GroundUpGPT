@@ -3,18 +3,18 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
   ChatMessage,
-  HealthStatus,
-  ModelInfo,
-  GenerationSettings,
-  ModelProfileEntry,
-  KnowledgeMode,
-  KnowledgeSource,
   ConversationSummary,
   ConversationDetail,
+  GenerationSettings,
+  ModelInfo,
+  ModelProfilesResponse,
+  AttachmentItem,
 } from "./types";
 import { Sidebar } from "./components/Sidebar";
+import { EmptyState } from "./components/EmptyState";
+import { Composer } from "./components/Composer";
 import { ChatMessageItem } from "./components/ChatMessageItem";
-import { ChatInput } from "./components/ChatInput";
+import { SettingsModal } from "./components/SettingsModal";
 import { streamSSE } from "./utils/sse";
 
 const API_BASE_URL =
@@ -27,35 +27,97 @@ const DEFAULT_SETTINGS: GenerationSettings = {
   max_new_tokens: 64,
   seed: null,
   repetition_penalty: 1.15,
+  nativeOnly: false,
 };
 
 export default function ChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState<string>("");
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
-  const [health, setHealth] = useState<HealthStatus | null>(null);
-  const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
-  const [profiles, setProfiles] = useState<Record<string, ModelProfileEntry> | null>(null);
-  const [activeProfile, setActiveProfile] = useState<string | null>(null);
-  const [settings, setSettings] = useState<GenerationSettings>(DEFAULT_SETTINGS);
-  const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
-  const [chatMode, setChatMode] = useState<"native" | "assisted">("native");
-  const [knowledgeMode, setKnowledgeMode] = useState<KnowledgeMode>("off");
-  const [knowledgeSources, setKnowledgeSources] = useState<KnowledgeSource[]>([]);
-  const [knowledgePanelOpen, setKnowledgePanelOpen] = useState<boolean>(false);
+  const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
   const [knowledgeSessionId, setKnowledgeSessionId] = useState<string | null>(null);
-  const [newDocName, setNewDocName] = useState<string>("");
-  const [newDocContent, setNewDocContent] = useState<string>("");
-  const [isAddingDoc, setIsAddingDoc] = useState<boolean>(false);
-  const [fileUploadError, setFileUploadError] = useState<string | null>(null);
-  const [fileUploadSuccess, setFileUploadSuccess] = useState<string | null>(null);
+
+  // Layout & UI state
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
+  const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [errorBanner, setErrorBanner] = useState<string | null>(null);
+
+  // History preference: Default OFF as strictly required
+  const [saveHistory, setSaveHistory] = useState<boolean>(false);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
-  const [saveHistory, setSaveHistory] = useState<boolean>(false);
+
+  // Model & Server state
+  const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
+  const [profiles, setProfiles] = useState<ModelProfilesResponse | null>(null);
+  const [activeProfile, setActiveProfile] = useState<string | null>(null);
+  const [isSwitchingModel, setIsSwitchingModel] = useState<boolean>(false);
+  const [settings, setSettings] = useState<GenerationSettings>(DEFAULT_SETTINGS);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 1. Initial Load: read localStorage preferences and backend state
+  useEffect(() => {
+    // Check saved history preference
+    const storedHistoryPref = localStorage.getItem("groundupgpt_save_history");
+    if (storedHistoryPref !== null) {
+      setSaveHistory(storedHistoryPref === "true");
+    }
+
+    // Check saved theme preference
+    const storedTheme = localStorage.getItem("groundupgpt_theme");
+    if (storedTheme === "light" || storedTheme === "dark") {
+      setTheme(storedTheme);
+      if (storedTheme === "light") {
+        document.documentElement.classList.add("light");
+      } else {
+        document.documentElement.classList.remove("light");
+      }
+    }
+
+    // Default sidebar closed on small viewports
+    if (typeof window !== "undefined" && window.innerWidth < 768) {
+      setSidebarOpen(false);
+    }
+
+    // Fetch initial backend state
+    fetchModelInfo();
+    fetchProfiles();
+    fetchConversations();
+  }, []);
+
+  // Auto-scroll messages to bottom
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const fetchModelInfo = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/model/info`);
+      if (res.ok) {
+        const data = await res.json();
+        setModelInfo(data);
+        if (data.active_profile) setActiveProfile(data.active_profile);
+      }
+    } catch {
+      // Backend offline or unreachable
+    }
+  };
+
+  const fetchProfiles = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/model/profiles`);
+      if (res.ok) {
+        const data = await res.json();
+        setProfiles(data);
+        if (data.active_profile) setActiveProfile(data.active_profile);
+      }
+    } catch {
+      // Backend offline
+    }
+  };
 
   const fetchConversations = async () => {
     try {
@@ -69,6 +131,326 @@ export default function ChatPage() {
     }
   };
 
+  const handleToggleTheme = (newTheme: "dark" | "light") => {
+    setTheme(newTheme);
+    localStorage.setItem("groundupgpt_theme", newTheme);
+    if (newTheme === "light") {
+      document.documentElement.classList.add("light");
+    } else {
+      document.documentElement.classList.remove("light");
+    }
+  };
+
+  const handleToggleSaveHistory = (val: boolean) => {
+    setSaveHistory(val);
+    localStorage.setItem("groundupgpt_save_history", String(val));
+    if (val) {
+      fetchConversations();
+    }
+  };
+
+  // --- File Attachment Handler ---
+  const handleAddFiles = async (files: FileList) => {
+    setErrorBanner(null);
+
+    // Ensure we have an active isolated session
+    let sessId = knowledgeSessionId;
+    if (!sessId) {
+      try {
+        const sRes = await fetch(`${API_BASE_URL}/api/knowledge/session`, { method: "POST" });
+        if (sRes.ok) {
+          const sData = await sRes.json();
+          sessId = sData.session_id;
+          setKnowledgeSessionId(sessId);
+        } else {
+          setErrorBanner("Failed to initialize document upload session.");
+          return;
+        }
+      } catch (err) {
+        setErrorBanner("Cannot reach server to initialize upload session.");
+        return;
+      }
+    }
+
+    if (!sessId) {
+      setErrorBanner("Could not establish document session.");
+      return;
+    }
+
+    // Process each selected file
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const tempId = `att-${Date.now()}-${i}`;
+
+      const newAtt: AttachmentItem = {
+        id: tempId,
+        name: file.name,
+        size: file.size,
+        type: file.type || "text/plain",
+        status: "uploading",
+      };
+
+      setAttachments((prev) => [...prev, newAtt]);
+
+      // Upload and extract locally on server
+      const formData = new FormData();
+      formData.append("session_id", sessId);
+      formData.append("file", file);
+
+      try {
+        const upRes = await fetch(`${API_BASE_URL}/api/knowledge/upload`, {
+          method: "POST",
+          body: formData,
+        });
+
+        if (upRes.ok) {
+          const upData = await upRes.json();
+          setAttachments((prev) =>
+            prev.map((a) =>
+              a.id === tempId
+                ? {
+                    ...a,
+                    status: "ready",
+                    sourceId: upData.source_id,
+                    warning: upData.warning,
+                  }
+                : a
+            )
+          );
+        } else {
+          const errData = await upRes.json().catch(() => null);
+          const detail = errData?.detail || `Upload failed (${upRes.status})`;
+          setAttachments((prev) =>
+            prev.map((a) =>
+              a.id === tempId ? { ...a, status: "error", error: detail } : a
+            )
+          );
+          setErrorBanner(`${file.name}: ${detail}`);
+        }
+      } catch (err: any) {
+        setAttachments((prev) =>
+          prev.map((a) =>
+            a.id === tempId
+              ? { ...a, status: "error", error: "Upload failed (network error)" }
+              : a
+          )
+        );
+        setErrorBanner(`Failed to upload ${file.name}`);
+      }
+    }
+  };
+
+  const handleRemoveAttachment = async (id: string) => {
+    const target = attachments.find((a) => a.id === id);
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+    if (target?.sourceId && knowledgeSessionId) {
+      try {
+        await fetch(`${API_BASE_URL}/api/knowledge/source/${target.sourceId}`, {
+          method: "DELETE",
+        });
+      } catch {
+        // ignore
+      }
+    }
+  };
+
+  // --- Send Message & Stream Response ---
+  const handleSubmit = async () => {
+    const trimmedInput = input.trim();
+    if (!trimmedInput && attachments.length === 0) return;
+    if (isGenerating) return;
+
+    setErrorBanner(null);
+
+    // Save prompt and attachments reference
+    const promptText = trimmedInput || `[Attached: ${attachments.map((a) => a.name).join(", ")}]`;
+    const sentAttachments = [...attachments];
+
+    // If history saving is ON and no active conversation, create one
+    let targetConvId = activeConversationId;
+    if (saveHistory && !targetConvId) {
+      try {
+        const titleText = promptText.length > 35 ? promptText.slice(0, 32) + "..." : promptText;
+        const cRes = await fetch(`${API_BASE_URL}/api/history/conversations`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: titleText }),
+        });
+        if (cRes.ok) {
+          const cData = await cRes.json();
+          targetConvId = cData.id;
+          setActiveConversationId(targetConvId);
+          fetchConversations();
+        }
+      } catch {
+        // continue without SQLite history if failed
+      }
+    }
+
+    // User Message
+    const userMsgId = `user-${Date.now()}`;
+    const userMsg: ChatMessage = {
+      id: userMsgId,
+      role: "user",
+      content: promptText,
+      attachments: sentAttachments.length > 0 ? sentAttachments : undefined,
+    };
+
+    // Assistant Message Placeholder
+    const assistantMsgId = `asst-${Date.now()}`;
+    const initialAssistantMsg: ChatMessage = {
+      id: assistantMsgId,
+      role: "assistant",
+      content: "",
+      isStreaming: true,
+      origin: "neural",
+      modelProfile: activeProfile ?? undefined,
+    };
+
+    setMessages((prev) => [...prev, userMsg, initialAssistantMsg]);
+    setInput("");
+    setAttachments([]);
+    setIsGenerating(true);
+
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
+    const requestMode = settings.nativeOnly ? "native" : "auto";
+
+    const payload = {
+      prompt: promptText,
+      mode: requestMode,
+      max_new_tokens: settings.max_new_tokens,
+      temperature: settings.temperature,
+      top_k: settings.top_k,
+      top_p: settings.top_p,
+      seed: settings.seed,
+      repetition_penalty: settings.repetition_penalty,
+      knowledge_session_id: knowledgeSessionId,
+      conversation_id: saveHistory ? targetConvId : null,
+    };
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/assistant/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: abortController.signal,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        const errDetail = errorData?.detail || `Server error (${response.status})`;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId
+              ? { ...m, isStreaming: false, content: `Error: ${errDetail}`, error: errDetail }
+              : m
+          )
+        );
+        setIsGenerating(false);
+        return;
+      }
+
+      await streamSSE(
+        response,
+        {
+          onToken: (tok) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId ? { ...m, content: m.content + tok.text } : m
+              )
+            );
+          },
+          onToolResult: (res) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId
+                  ? {
+                      ...m,
+                      content: res.answer_text,
+                      origin: res.origin,
+                      modelProfile: res.model_profile ?? undefined,
+                      toolName: res.tool_name ?? undefined,
+                      factId: res.fact_id ?? undefined,
+                      provenance: res.provenance ?? undefined,
+                      evaluatedExpression: res.evaluated_expression ?? undefined,
+                      errorCode: res.error_code ?? undefined,
+                      modelGenerated: res.model_generated,
+                      details: res.details ?? undefined,
+                    }
+                  : m
+              )
+            );
+          },
+          onDone: (done) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId
+                  ? {
+                      ...m,
+                      isStreaming: false,
+                      origin: done.origin || m.origin,
+                      modelGenerated: done.model_generated ?? m.modelGenerated,
+                      metrics: {
+                        promptTokens: done.prompt_tokens,
+                        generatedTokens: done.generated_tokens,
+                        totalTokens: done.total_tokens,
+                        activeContextTokens: done.active_context_tokens,
+                        contextLimit: done.context_limit,
+                        contextCropped: done.context_cropped,
+                        elapsedTimeSec: done.elapsed_time_sec,
+                        tokensPerSecond: done.tokens_per_second,
+                      },
+                    }
+                  : m
+              )
+            );
+            setIsGenerating(false);
+            if (saveHistory) fetchConversations();
+          },
+          onError: (errMsg) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId
+                  ? { ...m, isStreaming: false, error: errMsg, content: m.content || `Error: ${errMsg}` }
+                  : m
+              )
+            );
+            setIsGenerating(false);
+          },
+        },
+        abortController.signal
+      );
+    } catch (err: any) {
+      if (!abortController.signal.aborted) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId
+              ? { ...m, isStreaming: false, error: msg, content: `Error: ${msg}` }
+              : m
+          )
+        );
+      }
+    } finally {
+      setIsGenerating(false);
+      abortControllerRef.current = null;
+    }
+  };
+
+  const handleStop = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsGenerating(false);
+    setMessages((prev) =>
+      prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m))
+    );
+  };
+
+  // --- Conversation Management ---
   const handleSelectConversation = async (id: string) => {
     if (isGenerating) return;
     try {
@@ -85,16 +467,36 @@ export default function ChatPage() {
           details: m.details,
         }));
         setMessages(mapped);
+        setAttachments([]);
       }
     } catch {
       // ignore
     }
   };
 
-  const handleNewConversation = () => {
+  const handleNewChat = () => {
     if (isGenerating) return;
     setActiveConversationId(null);
     setMessages([]);
+    setAttachments([]);
+    setErrorBanner(null);
+  };
+
+  const handleRenameConversation = async (id: string, newTitle: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/history/conversations/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: newTitle }),
+      });
+      if (res.ok) {
+        setConversations((prev) =>
+          prev.map((c) => (c.id === id ? { ...c, title: newTitle } : c))
+        );
+      }
+    } catch {
+      // ignore
+    }
   };
 
   const handleDeleteConversation = async (id: string) => {
@@ -103,816 +505,179 @@ export default function ChatPage() {
         method: "DELETE",
       });
       if (res.ok) {
+        setConversations((prev) => prev.filter((c) => c.id !== id));
         if (activeConversationId === id) {
           setActiveConversationId(null);
           setMessages([]);
         }
-        await fetchConversations();
       }
     } catch {
       // ignore
     }
   };
 
-  const fetchKnowledgeSources = async (sid?: string) => {
-    const s = sid || knowledgeSessionId;
-    if (!s) return;
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/knowledge/sources?session_id=${encodeURIComponent(s)}`);
-      if (res.ok) {
-        const data = await res.json();
-        setKnowledgeSources(data);
-      }
-    } catch {
-      // ignore
-    }
-  };
-
-  const initKnowledgeSession = async () => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/knowledge/session`, { method: "POST" });
-      if (res.ok) {
-        const data = await res.json();
-        setKnowledgeSessionId(data.session_id);
-        await fetchKnowledgeSources(data.session_id);
-      }
-    } catch (err) {
-      console.error("Failed to initialize isolated knowledge session:", err);
-    }
-  };
-
-  const handleAddKnowledge = async (
-    overrideName?: string,
-    overrideContent?: string,
-    overrideType?: string
-  ) => {
-    const docContent = overrideContent !== undefined ? overrideContent : newDocContent;
-    const docName = overrideName !== undefined ? overrideName : newDocName;
-    const docType = overrideType || "txt";
-
-    if (!docContent.trim() || !knowledgeSessionId) return;
-    try {
-      setIsAddingDoc(true);
-      setFileUploadError(null);
-      const res = await fetch(`${API_BASE_URL}/api/knowledge/source`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          session_id: knowledgeSessionId,
-          display_name: docName.trim() || "pasted_note.txt",
-          content: docContent,
-          source_type: docType,
-        }),
-      });
-      if (res.ok) {
-        if (overrideContent === undefined) {
-          setNewDocName("");
-          setNewDocContent("");
-        }
-        setFileUploadSuccess(`Document '${docName.trim() || "pasted_note.txt"}' ingested successfully.`);
-        setTimeout(() => setFileUploadSuccess(null), 4000);
-        await fetchKnowledgeSources();
-      } else {
-        const err = await res.json().catch(() => ({ detail: "Upload failed" }));
-        setFileUploadError(`Failed to add knowledge document: ${err.detail}`);
-      }
-    } catch (err) {
-      setFileUploadError(`Network error adding document: ${err}`);
-    } finally {
-      setIsAddingDoc(false);
-    }
-  };
-
-  const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // Reset input value so same file can be re-selected if desired
-    e.target.value = "";
-    setFileUploadError(null);
-    setFileUploadSuccess(null);
-
-    // Validation 1: Extension check (.txt or .md)
-    const lowerName = file.name.toLowerCase();
-    const isTxt = lowerName.endsWith(".txt");
-    const isMd = lowerName.endsWith(".md");
-    if (!isTxt && !isMd) {
-      setFileUploadError("Unsupported format. Only .txt and .md files are supported.");
-      return;
-    }
-
-    // Validation 2: Byte size check (<= 16 KB = 16,384 bytes)
-    if (file.size > 16384) {
-      setFileUploadError(`File size (${file.size} bytes) exceeds maximum limit of 16 KB (16,384 bytes).`);
-      return;
-    }
-
-    // Validation 3: Non-empty check
-    if (file.size === 0) {
-      setFileUploadError("File is empty (0 bytes).");
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const text = event.target?.result;
-      if (typeof text !== "string") {
-        setFileUploadError("Failed to decode file as UTF-8 text.");
-        return;
-      }
-
-      // Validation 4: Reject binary null bytes
-      if (text.includes("\x00")) {
-        setFileUploadError("Binary or null bytes detected in file. Only clean UTF-8 text files are accepted.");
-        return;
-      }
-
-      // Validation 5: Reject empty / whitespace-only content
-      if (!text.trim()) {
-        setFileUploadError("File content cannot be empty or whitespace-only.");
-        return;
-      }
-
-      // Automatically ingest validated file content
-      await handleAddKnowledge(file.name, text, isMd ? "md" : "txt");
-    };
-
-    reader.onerror = () => {
-      setFileUploadError("Error reading local file.");
-    };
-
-    reader.readAsText(file, "UTF-8");
-  };
-
-  const handleDeleteKnowledge = async (sourceId: string) => {
-    if (!knowledgeSessionId) return;
-    try {
-      const res = await fetch(
-        `${API_BASE_URL}/api/knowledge/source/${sourceId}?session_id=${encodeURIComponent(knowledgeSessionId)}`,
-        { method: "DELETE" }
-      );
-      if (res.ok) {
-        await fetchKnowledgeSources();
-      }
-    } catch {
-      // ignore
-    }
-  };
-
-  // Poll server health & model information on mount
-  useEffect(() => {
-    initKnowledgeSession();
-    fetchConversations();
-    async function checkStatus() {
-      try {
-        const healthRes = await fetch(`${API_BASE_URL}/api/health`);
-        if (healthRes.ok) {
-          const healthData = await healthRes.json();
-          setHealth(healthData);
-
-          if (healthData.model_loaded) {
-            const [infoRes, profRes] = await Promise.all([
-              fetch(`${API_BASE_URL}/api/model/info`),
-              fetch(`${API_BASE_URL}/api/model/profiles`),
-            ]);
-            if (infoRes.ok) {
-              const infoData = await infoRes.json();
-              setModelInfo(infoData);
-            }
-            if (profRes.ok) {
-              const profData = await profRes.json();
-              setProfiles(profData.profiles || null);
-              if (profData.active_profile) {
-                setActiveProfile(profData.active_profile);
-              }
-            }
-          }
-        } else {
-          setHealth(null);
-        }
-      } catch (err) {
-        setHealth(null);
-      }
-    }
-
-    checkStatus();
-    const interval = setInterval(checkStatus, 15000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Auto-scroll to bottom of conversation
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isGenerating]);
-
-  // Execute generation stream from prompt
-  const executeGeneration = async (promptText: string) => {
-    if (!promptText.trim() || isGenerating) return;
-
-    const userMessageId = `user-${Date.now()}`;
-    const assistantMessageId = `assistant-${Date.now()}`;
-
-    const userMsg: ChatMessage = {
-      id: userMessageId,
-      role: "user",
-      content: promptText,
-    };
-
-    const assistantMsg: ChatMessage = {
-      id: assistantMessageId,
-      role: "assistant",
-      content: "",
-      isStreaming: true,
-      modelProfile: modelInfo?.profile_name || activeProfile || "GroundUpGPT",
-      mode: chatMode,
-    };
-
-    setMessages((prev) => [...prev, userMsg, assistantMsg]);
-    setInput("");
-    setIsGenerating(true);
-
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
-
-    let convId = activeConversationId;
-    if (saveHistory && !convId) {
-      try {
-        const createRes = await fetch(`${API_BASE_URL}/api/history/conversations`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title: promptText.slice(0, 40) }),
-        });
-        if (createRes.ok) {
-          const newConv = await createRes.json();
-          convId = newConv.id;
-          setActiveConversationId(convId);
-        }
-      } catch {
-        // ignore
-      }
-    }
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/assistant/stream`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: promptText,
-          mode: chatMode,
-          knowledge_mode: chatMode === "native" ? "off" : knowledgeMode,
-          knowledge_session_id: chatMode === "native" ? undefined : (knowledgeSessionId || undefined),
-          conversation_id: saveHistory ? (convId || undefined) : undefined,
-          max_new_tokens: settings.max_new_tokens,
-          temperature: settings.temperature,
-          top_k: settings.top_k,
-          top_p: settings.top_p,
-          seed: settings.seed,
-          repetition_penalty: settings.repetition_penalty ?? 1.0,
-        }),
-        signal: abortController.signal,
-      });
-
-      if (!response.ok) {
-        let errDetail = `HTTP ${response.status} ${response.statusText}`;
-        try {
-          const errJson = await response.json();
-          if (errJson.detail) errDetail = errJson.detail;
-        } catch {
-          // ignore parsing error
-        }
-        throw new Error(errDetail);
-      }
-
-      await streamSSE(
-        response,
-        {
-          onToken: (tok) => {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMessageId
-                  ? { ...m, content: m.content + tok.text, origin: m.origin || "neural" }
-                  : m
-              )
-            );
-          },
-          onToolResult: (toolResult) => {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMessageId
-                  ? {
-                      ...m,
-                      content: toolResult.answer_text,
-                      origin: toolResult.origin,
-                      toolName: toolResult.tool_name ?? undefined,
-                      factId: toolResult.fact_id ?? undefined,
-                      provenance: toolResult.provenance ?? undefined,
-                      evaluatedExpression: toolResult.evaluated_expression ?? undefined,
-                      errorCode: toolResult.error_code ?? undefined,
-                      modelGenerated: toolResult.model_generated,
-                      details: toolResult.details ?? undefined,
-                    }
-                  : m
-              )
-            );
-          },
-          onDone: (done) => {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMessageId
-                  ? {
-                      ...m,
-                      isStreaming: false,
-                      origin: m.origin || done.origin || "neural",
-                      metrics: {
-                        promptTokens: done.prompt_tokens,
-                        generatedTokens: done.generated_tokens,
-                        totalTokens: done.total_tokens,
-                        activeContextTokens: done.active_context_tokens,
-                        contextLimit: done.context_limit,
-                        contextCropped: done.context_cropped,
-                        elapsedTimeSec: done.elapsed_time_sec,
-                        tokensPerSecond: done.tokens_per_second,
-                      },
-                    }
-                  : m
-              )
-            );
-          },
-          onError: (errMsg) => {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMessageId
-                  ? { ...m, isStreaming: false, error: errMsg }
-                  : m
-              )
-            );
-          },
-        },
-        abortController.signal
-      );
-    } catch (err: unknown) {
-      if (abortController.signal.aborted) {
-        // Stream deliberately halted by Stop button; preserve partial text
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantMessageId ? { ...m, isStreaming: false } : m
-          )
-        );
-      } else {
-        const message = err instanceof Error ? err.message : String(err);
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantMessageId
-              ? { ...m, isStreaming: false, error: message }
-              : m
-          )
-        );
-      }
-    } finally {
-      setIsGenerating(false);
-      abortControllerRef.current = null;
-      fetchConversations();
-    }
-  };
-
-  const handleStop = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-  };
-
-  const handleRegenerate = () => {
-    // Find the last user prompt in message history
-    const lastUserIndex = messages.findLastIndex((m) => m.role === "user");
-    if (lastUserIndex === -1) return;
-
-    const lastPrompt = messages[lastUserIndex].content;
-    // Slice off the last prompt and subsequent messages, then resubmit
-    setMessages((prev) => prev.slice(0, lastUserIndex));
-    executeGeneration(lastPrompt);
-  };
-
-  const handleClearChat = () => {
-    if (isGenerating) handleStop();
-    setMessages([]);
-  };
-
-  const handleSwitchProfile = async (profile: string) => {
+  const handleSwitchProfile = async (profileKey: string) => {
+    setIsSwitchingModel(true);
     try {
       const res = await fetch(`${API_BASE_URL}/api/model/load`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile }),
+        body: JSON.stringify({ profile_name: profileKey }),
       });
       if (res.ok) {
-        const info = await res.json();
-        setModelInfo(info);
-        setActiveProfile(profile);
-      } else {
-        const errData = await res.json().catch(() => ({ detail: "Unknown server error" }));
-        console.error("Failed to switch model profile:", errData.detail);
-        alert(`Failed to load model profile '${profile}': ${errData.detail || res.statusText}`);
+        setActiveProfile(profileKey);
+        fetchModelInfo();
       }
-    } catch (err) {
-      console.error("Failed to switch model profile:", err);
-      alert(`Network error switching model profile: ${err}`);
+    } catch {
+      // ignore
+    } finally {
+      setIsSwitchingModel(false);
     }
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-slate-950 text-slate-100">
-      {/* Sidebar Navigation */}
+    <div className="flex h-screen w-screen overflow-hidden bg-[#212121] text-zinc-100 font-sans">
+      {/* Sidebar */}
       <Sidebar
-        health={health}
-        modelInfo={modelInfo}
-        profiles={profiles}
-        activeProfileKey={activeProfile}
-        settings={settings}
-        onUpdateSettings={setSettings}
-        onClearChat={handleClearChat}
-        onSwitchProfile={handleSwitchProfile}
-        isGenerating={isGenerating}
         isOpen={sidebarOpen}
-        onClose={() => setSidebarOpen(false)}
+        onToggle={() => setSidebarOpen(!sidebarOpen)}
         conversations={conversations}
         activeConversationId={activeConversationId}
         onSelectConversation={handleSelectConversation}
-        onNewConversation={handleNewConversation}
+        onNewChat={handleNewChat}
+        onRenameConversation={handleRenameConversation}
         onDeleteConversation={handleDeleteConversation}
-        saveHistory={saveHistory}
-        onToggleSaveHistory={setSaveHistory}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
 
-      {/* Main Chat Interface */}
-      <main className="flex flex-1 flex-col overflow-hidden">
-        {/* Top Navbar */}
-        <header className="flex h-14 items-center justify-between border-b border-slate-800 bg-slate-900/60 px-4">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="rounded p-1 text-slate-400 hover:text-slate-100 md:hidden"
-              aria-label="Open sidebar"
-            >
-              ☰
-            </button>
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-slate-200">
-                GroundUpGPT
-              </span>
-              <span className={`rounded px-2 py-0.5 text-[10px] font-mono font-medium border ${
-                modelInfo?.is_sft
-                  ? "bg-amber-950 text-amber-300 border-amber-800"
-                  : "bg-teal-950 text-teal-400 border-teal-800"
-              }`}>
-                {modelInfo?.is_sft
-                  ? `${(modelInfo.total_parameters || 0) > 20000000 ? "27M" : "5M"} SFT #${modelInfo.sft_step ?? modelInfo.checkpoint_step} (Chat) • Active`
-                  : modelInfo?.checkpoint_step !== undefined && modelInfo.checkpoint_step !== null
-                  ? `Step ${modelInfo.checkpoint_step} • Active`
-                  : "Active"}
-              </span>
-            </div>
-          </div>
-
-          {/* Mode & Knowledge Controls */}
+      {/* Main Conversation Column */}
+      <main className="relative flex flex-1 flex-col h-full min-w-0 bg-[#212121] overflow-hidden">
+        {/* Top Navbar Header (Minimal) */}
+        <header className="flex h-12 shrink-0 items-center justify-between px-3 sm:px-4 z-10">
           <div className="flex items-center gap-2">
-            {/* Persistence Indicator Pill (Step 47) */}
-            <div
-              className="flex items-center gap-1.5 rounded border border-slate-800 bg-slate-950 px-2 py-1 text-xs font-mono cursor-pointer hover:border-slate-700 transition"
-              onClick={() => setSaveHistory(!saveHistory)}
-              title={saveHistory ? "Chat persistence: ON (Saving to SQLite). Click to turn off." : "Chat persistence: OFF (In-Memory Only). Click to turn on."}
-            >
-              <span className={`inline-block h-2 w-2 rounded-full ${saveHistory ? "bg-teal-400" : "bg-slate-500"}`} />
-              <span className={saveHistory ? "text-teal-300 font-medium" : "text-slate-400"}>
-                {saveHistory ? "Saving Chat" : "History Off"}
-              </span>
-            </div>
-
-            {/* Mode Selector Toggle */}
-            <div className="flex items-center gap-1 rounded-lg bg-slate-950 p-1 border border-slate-800">
+            {!sidebarOpen && (
               <button
                 type="button"
-                onClick={() => {
-                  setChatMode("native");
-                  setKnowledgeMode("off");
-                }}
-                className={`rounded px-2.5 py-1 text-xs font-medium transition ${
-                  chatMode === "native"
-                    ? "bg-slate-800 text-slate-100 shadow-sm border border-slate-700"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-                title="Native GPT: Responses generated purely by your locally trained Transformer without tools or retrieval."
+                onClick={() => setSidebarOpen(true)}
+                title="Open sidebar"
+                aria-label="Open sidebar"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-white transition"
               >
-                Native GPT
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-5 w-5"
+                >
+                  <rect width="18" height="18" x="3" y="3" rx="2" />
+                  <path d="M9 3v18" />
+                </svg>
               </button>
-              <button
-                type="button"
-                onClick={() => setChatMode("assisted")}
-                className={`rounded px-2.5 py-1 text-xs font-medium transition ${
-                  chatMode === "assisted"
-                    ? "bg-indigo-950 text-indigo-300 shadow-sm border border-indigo-800"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-                title="Tool-Assisted: Uses deterministic tools for math/facts, with optional evidence or grounded neural answering."
-              >
-                Tool-Assisted
-              </button>
-            </div>
-
-            {/* Knowledge Mode Toggle */}
-            <div className="flex items-center gap-1 rounded-lg bg-slate-950 p-1 border border-slate-800">
-              <span className="text-[10px] font-mono text-slate-500 uppercase px-1">Knowledge:</span>
-              <button
-                type="button"
-                onClick={() => setKnowledgeMode("off")}
-                className={`rounded px-2 py-0.5 text-xs font-medium transition ${
-                  knowledgeMode === "off"
-                    ? "bg-slate-800 text-slate-100 shadow-sm border border-slate-700"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                Off
-              </button>
-              <button
-                type="button"
-                disabled={chatMode === "native"}
-                onClick={() => {
-                  if (chatMode === "native") return;
-                  setKnowledgeMode("evidence");
-                  setKnowledgePanelOpen(true);
-                  fetchKnowledgeSources();
-                }}
-                className={`rounded px-2 py-0.5 text-xs font-medium transition ${
-                  chatMode === "native"
-                    ? "opacity-40 cursor-not-allowed text-slate-500"
-                    : knowledgeMode === "evidence"
-                    ? "bg-amber-950 text-amber-300 shadow-sm border border-amber-800"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-                title={
-                  chatMode === "native"
-                    ? "Knowledge retrieval is inactive in Native GPT mode. Switch to Tool-Assisted to enable."
-                    : "Show Source Evidence: Returns exact matching document passage without model hallucination (0 model calls)."
-                }
-              >
-                Evidence
-              </button>
-              <button
-                type="button"
-                disabled={chatMode === "native"}
-                onClick={() => {
-                  if (chatMode === "native") return;
-                  setKnowledgeMode("grounded");
-                  setKnowledgePanelOpen(true);
-                  fetchKnowledgeSources();
-                }}
-                className={`rounded px-2 py-0.5 text-xs font-medium transition ${
-                  chatMode === "native"
-                    ? "opacity-40 cursor-not-allowed text-slate-500"
-                    : knowledgeMode === "grounded"
-                    ? "bg-indigo-950 text-indigo-300 shadow-sm border border-indigo-800"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-                title={
-                  chatMode === "native"
-                    ? "Grounded neural generation is inactive in Native GPT mode. Switch to Tool-Assisted to enable."
-                    : "Experimental Grounded GPT: Injects retrieved passage into model prompt context."
-                }
-              >
-                Grounded
-              </button>
-              <button
-                type="button"
-                onClick={() => setKnowledgePanelOpen(!knowledgePanelOpen)}
-                className={`ml-1 rounded px-1.5 py-0.5 text-[10px] font-mono border transition ${
-                  knowledgePanelOpen
-                    ? "border-teal-700 bg-teal-950 text-teal-300"
-                    : "border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200"
-                }`}
-                title="Toggle Knowledge Document Manager"
-              >
-                Docs ({knowledgeSources.length}) {knowledgePanelOpen ? "▴" : "▾"}
-              </button>
-            </div>
+            )}
+            <span className="text-xs font-medium text-zinc-400 select-none">
+              {settings.nativeOnly
+                ? "GroundUpGPT (Native Only)"
+                : activeProfile
+                ? `GroundUpGPT (${activeProfile})`
+                : "GroundUpGPT"}
+            </span>
           </div>
 
-          <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
-            {health?.model_loaded ? (
-              <span className="hidden sm:inline">
-                {modelInfo?.total_parameters?.toLocaleString() ?? 0} parameters
-              </span>
-            ) : (
-              <span className="text-amber-400">Model not loaded</span>
-            )}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              title="Settings"
+              aria-label="Settings"
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-white transition"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-4 w-4"
+              >
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </button>
           </div>
         </header>
 
-        {/* Collapsible Knowledge Document Manager Panel */}
-        {knowledgePanelOpen && (
-          <div className="border-b border-slate-800 bg-slate-900/90 px-4 py-3 text-xs">
-            <div className="flex flex-col md:flex-row gap-4">
-              {/* Document Ingestion Form */}
-              <div className="flex-1 flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-slate-200 font-mono text-[11px]">
-                    + Add Document / Knowledge Passage (Max 16 KB)
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="file"
-                      ref={fileInputRef}
-                      accept=".txt,.md"
-                      onChange={handleFileSelected}
-                      className="hidden"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={isAddingDoc}
-                      className="flex items-center gap-1 rounded border border-slate-700 bg-slate-800 px-2 py-0.5 text-[11px] text-slate-200 hover:bg-slate-700 transition disabled:opacity-50"
-                      title="Upload local .txt or .md file (max 16 KB)"
-                    >
-                      <span>📁</span>
-                      <span>Upload .txt / .md</span>
-                    </button>
-                  </div>
-                </div>
-
-                {fileUploadError && (
-                  <div className="rounded border border-rose-800 bg-rose-950/60 px-2.5 py-1 text-[11px] text-rose-300">
-                    ⚠️ {fileUploadError}
-                  </div>
-                )}
-                {fileUploadSuccess && (
-                  <div className="rounded border border-teal-800 bg-teal-950/60 px-2.5 py-1 text-[11px] text-teal-300">
-                    ✓ {fileUploadSuccess}
-                  </div>
-                )}
-
-                <input
-                  type="text"
-                  placeholder="Document Title (e.g. project_apollo.txt)"
-                  value={newDocName}
-                  onChange={(e) => setNewDocName(e.target.value)}
-                  className="rounded border border-slate-700 bg-slate-950 px-2.5 py-1 text-xs text-slate-100 placeholder-slate-500 focus:border-teal-500 focus:outline-none"
-                />
-                <textarea
-                  rows={3}
-                  placeholder="Paste factual text or notes here to ground responses..."
-                  value={newDocContent}
-                  onChange={(e) => setNewDocContent(e.target.value)}
-                  className="rounded border border-slate-700 bg-slate-950 px-2.5 py-1 text-xs text-slate-100 placeholder-slate-500 focus:border-teal-500 focus:outline-none font-mono"
-                />
-                <div className="flex justify-between items-center">
-                  <span className="text-[10px] text-slate-500 font-mono">
-                    {newDocContent.length} chars (~{Math.round(newDocContent.length / 4)} tokens)
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => handleAddKnowledge()}
-                    disabled={isAddingDoc || !newDocContent.trim()}
-                    className="rounded bg-teal-600 px-3 py-1 text-xs font-medium text-white hover:bg-teal-500 disabled:opacity-50"
-                  >
-                    {isAddingDoc ? "Ingesting..." : "Ingest Document"}
-                  </button>
-                </div>
-              </div>
-
-              {/* Ingested Documents List */}
-              <div className="flex-1 flex flex-col gap-1.5 border-t md:border-t-0 md:border-l border-slate-800 md:pl-4">
-                <div className="flex justify-between items-center">
-                  <span className="font-semibold text-slate-200 font-mono text-[11px]">
-                    Active Documents in Session ({knowledgeSources.length}/10)
-                  </span>
-                </div>
-                {knowledgeSources.length === 0 ? (
-                  <p className="text-[11px] text-slate-500 italic py-2">
-                    No documents ingested yet. Add a passage on the left or upload a file to enable document-attributed retrieval.
-                  </p>
-                ) : (
-                  <div className="max-h-28 overflow-y-auto space-y-1.5 pr-1">
-                    {knowledgeSources.map((s) => (
-                      <div
-                        key={s.source_id}
-                        className="flex items-center justify-between rounded border border-slate-800 bg-slate-950/60 px-2.5 py-1 text-[11px]"
-                      >
-                        <div className="flex flex-col">
-                          <span className="font-semibold text-slate-300 font-mono">{s.display_name}</span>
-                          <span className="text-[9px] text-slate-500 font-mono">
-                            {s.chunk_count} chunks • {s.character_count} chars • {s.token_count} tokens
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteKnowledge(s.source_id)}
-                          className="rounded text-rose-400 hover:text-rose-300 text-xs px-1.5 py-0.5 hover:bg-rose-950/40"
-                          title="Delete source"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
+        {/* Error Notification Banner */}
+        {errorBanner && (
+          <div className="mx-4 mb-2 flex items-center justify-between rounded-xl border border-rose-800/80 bg-rose-950/70 px-3.5 py-2 text-xs text-rose-200">
+            <span>{errorBanner}</span>
+            <button
+              type="button"
+              onClick={() => setErrorBanner(null)}
+              className="ml-2 text-rose-400 hover:text-white"
+            >
+              ✕
+            </button>
           </div>
         )}
 
-        {/* Mode Description Sub-Header */}
-        <div className="border-b border-slate-800/80 bg-slate-900/40 px-4 py-1.5 text-[11px] text-slate-400 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-slate-300">
-              {chatMode === "native" ? "Native GPT" : "Tool-Assisted"}:
-            </span>
-            <span>
-              {chatMode === "native"
-                ? "Pure neural autoregressive inference directly from the locally trained checkpoint."
-                : "Deterministic local tools for exact calculations and facts; fallback or grounded neural for other queries."}
-            </span>
-            {chatMode === "native" ? (
-              <span className="ml-2 rounded px-1.5 py-0.5 text-[10px] font-mono border border-slate-700 bg-slate-950 text-slate-400">
-                Knowledge: Inactive (Pure Neural Isolation)
-              </span>
-            ) : knowledgeMode !== "off" ? (
-              <span className="ml-2 rounded px-1.5 py-0.5 text-[10px] font-mono border border-amber-800 bg-amber-950/60 text-amber-300">
-                Knowledge: {knowledgeMode === "evidence" ? "Evidence Mode (0 model calls)" : "Grounded GPT Mode"}
-              </span>
-            ) : null}
-          </div>
-          <span className="hidden sm:inline font-mono text-[10px] text-slate-500">
-            Mode: {chatMode} • Knowledge: {chatMode === "native" ? "off" : knowledgeMode} • History: {saveHistory ? "persisted" : "in-memory"}
-          </span>
-        </div>
-
-        {/* Message Thread Scroll Area */}
-        <div className="flex-1 overflow-y-auto px-4 py-6">
-          <div className="mx-auto flex max-w-3xl flex-col">
+        {/* Middle Area: Welcome Empty State or Messages Stream */}
+        <div className="flex-1 overflow-y-auto px-4 py-2 sm:px-6">
+          <div className="mx-auto flex h-full max-w-3xl flex-col">
             {messages.length === 0 ? (
-              <div className="my-auto flex flex-col items-center justify-center py-16 text-center">
-                <div className={`flex h-12 w-12 items-center justify-center rounded-xl border font-mono text-lg font-bold ${
-                  modelInfo?.is_sft
-                    ? "bg-amber-900/40 border-amber-700/60 text-amber-300"
-                    : "bg-teal-900/40 border-teal-700/60 text-teal-300"
-                }`}>
-                  G
-                </div>
-                <h2 className="mt-4 text-lg font-semibold text-slate-100">
-                  {modelInfo?.is_sft ? "GroundUpGPT Assistant (Experimental)" : "GroundUpGPT Web Completion"}
-                </h2>
-                <p className="mt-1.5 max-w-md text-xs leading-relaxed text-slate-400">
-                  {modelInfo?.is_sft
-                    ? "5.05M-parameter Transformer fine-tuned on Dolly 15k instruction pairs. Ask a question or command."
-                    : "First-principles Transformer language model trained from scratch. Enter a starting prefix to observe next-token autoregressive completions."}
-                </p>
-
-                {/* Prompt Suggestions */}
-                <div className="mt-8 flex flex-wrap justify-center gap-2">
-                  {(modelInfo?.is_sft
-                    ? ["What is Python?", "Explain gravity in simple terms", "Write a short poem about coding", "What are the primary colors?"]
-                    : ["The ", "Once upon ", "In the ancient ", "GroundUpGPT "]
-                  ).map((promptSample) => (
-                    <button
-                      key={promptSample}
-                      onClick={() => executeGeneration(promptSample)}
-                      className={`rounded-full border border-slate-800 bg-slate-900 px-3.5 py-1.5 text-xs text-slate-300 transition ${
-                        modelInfo?.is_sft
-                          ? "hover:border-amber-600 hover:text-amber-300"
-                          : "hover:border-teal-600 hover:text-teal-300"
-                      }`}
-                    >
-                      {promptSample} →
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <EmptyState />
             ) : (
-              messages.map((message, idx) => (
-                <ChatMessageItem
-                  key={message.id}
-                  message={message}
-                  isLastAssistant={
-                    message.role === "assistant" && idx === messages.length - 1
-                  }
-                  isGenerating={isGenerating}
-                  onRegenerate={handleRegenerate}
-                />
-              ))
+              <div className="flex flex-col space-y-1 pb-6">
+                {messages.map((m, idx) => (
+                  <ChatMessageItem
+                    key={m.id || idx}
+                    message={m}
+                    isLastAssistant={idx === messages.length - 1 && m.role === "assistant"}
+                    isGenerating={isGenerating}
+                    onRegenerate={handleSubmit}
+                  />
+                ))}
+                <div ref={messagesEndRef} />
+              </div>
             )}
-            <div ref={messagesEndRef} />
           </div>
         </div>
 
-        {/* Chat Input Bar */}
-        <ChatInput
+        {/* Bottom Composer */}
+        <Composer
           input={input}
           onChange={setInput}
-          onSubmit={() => executeGeneration(input)}
+          onSubmit={handleSubmit}
           onStop={handleStop}
           isGenerating={isGenerating}
-          disabled={!health?.model_loaded}
-          isSft={modelInfo?.is_sft}
+          disabled={false}
+          attachments={attachments}
+          onAddFiles={handleAddFiles}
+          onRemoveAttachment={handleRemoveAttachment}
         />
       </main>
+
+      {/* Settings Modal */}
+      <SettingsModal
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
+        saveHistory={saveHistory}
+        onToggleSaveHistory={handleToggleSaveHistory}
+        modelInfo={modelInfo}
+        profiles={profiles}
+        activeProfile={activeProfile}
+        onSwitchProfile={handleSwitchProfile}
+        settings={settings}
+        onUpdateSettings={setSettings}
+        isSwitchingModel={isSwitchingModel}
+      />
     </div>
   );
 }

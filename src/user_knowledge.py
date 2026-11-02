@@ -320,7 +320,7 @@ class KnowledgeStore:
             # 2. Sanitize display name and source type
             clean_name = sanitize_display_name(display_name)
             st = source_type.lower().strip()
-            if st not in ("pasted", "txt", "md"):
+            if st not in ("pasted", "txt", "md", "pdf", "docx"):
                 st = "pasted"
 
             # 3. Create unique source ID and hash

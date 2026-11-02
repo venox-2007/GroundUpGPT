@@ -45,7 +45,8 @@ VALID_ORIGINS = {
 # Supported chat modes
 MODE_NATIVE = "native"
 MODE_ASSISTED = "assisted"
-VALID_MODES = {MODE_NATIVE, MODE_ASSISTED}
+MODE_AUTO = "auto"
+VALID_MODES = {MODE_NATIVE, MODE_ASSISTED, MODE_AUTO}
 
 # Curated facts inventory excluding synthetic testing records
 CURATED_FACTS: List[FactRecord] = [
@@ -157,7 +158,7 @@ class AssistantRouter:
             ValueError: If mode is not strictly 'native' or 'assisted'.
         """
         if mode not in VALID_MODES:
-            raise ValueError(f"Invalid mode '{mode}'. Must be strictly 'native' or 'assisted'.")
+            raise ValueError(f"Invalid mode '{mode}'. Must be strictly 'native', 'assisted', or 'auto'.")
 
         prompt_clean = prompt.strip()
 
@@ -176,7 +177,7 @@ class AssistantRouter:
             if calc_result.is_valid:
                 return AssistantRouteDecision(
                     origin=ORIGIN_SAFE_CALCULATOR,
-                    mode=MODE_ASSISTED,
+                    mode=mode,
                     model_generated=False,
                     is_terminal=True,
                     answer_text=str(calc_result.result_str),
@@ -187,7 +188,7 @@ class AssistantRouter:
             else:
                 return AssistantRouteDecision(
                     origin=ORIGIN_TOOL_ERROR,
-                    mode=MODE_ASSISTED,
+                    mode=mode,
                     model_generated=False,
                     is_terminal=True,
                     answer_text=f"SafeCalculator Error: {calc_result.error_message}",
@@ -200,12 +201,13 @@ class AssistantRouter:
         # 2. Check for domain-aware curated factual queries
         fact_decision = self._route_factual_query(prompt_clean)
         if fact_decision is not None:
+            fact_decision.mode = mode
             return fact_decision
 
         # 3. Fallback to neural generation for conversational / creative / uncataloged queries
         return AssistantRouteDecision(
             origin=ORIGIN_NEURAL,
-            mode=MODE_ASSISTED,
+            mode=mode,
             model_generated=True,
             is_terminal=False,
         )

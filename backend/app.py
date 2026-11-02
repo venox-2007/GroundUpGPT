@@ -12,7 +12,7 @@ import time
 from typing import Any, AsyncIterator, Dict, List, Optional
 import uuid
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Request, status, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -21,6 +21,7 @@ from backend.assistant_router import (
     assistant_router,
     MODE_NATIVE,
     MODE_ASSISTED,
+    MODE_AUTO,
     ORIGIN_NEURAL,
     ORIGIN_SAFE_CALCULATOR,
     ORIGIN_LOCAL_FACT,
@@ -60,6 +61,7 @@ from src.chat_history import ChatHistoryManager
 from src.generation import GenerationConfig
 from src.user_knowledge import knowledge_store
 from src.user_knowledge_retrieval import UserKnowledgeRetriever
+from src.document_extractor import extract_text_from_bytes
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -534,17 +536,33 @@ async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
         return resp
 
     # 1. Validate mode strictly
-    if request.mode not in (MODE_NATIVE, MODE_ASSISTED):
+    if request.mode not in (MODE_NATIVE, MODE_ASSISTED, MODE_AUTO):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid mode '{request.mode}'. Must be strictly 'native' or 'assisted'.",
+            detail=f"Invalid mode '{request.mode}'. Must be strictly 'native', 'assisted', or 'auto'.",
         )
 
-    # 2. Strict Native GPT Mode Isolation
-    # Under Native GPT mode, knowledge retrieval, safe calculator, and curated facts are strictly inactive.
-    # Forged requests with mode='native' and knowledge_mode!='off' are neutralized to pure neural generation.
-    effective_knowledge_mode = "off" if request.mode == MODE_NATIVE else request.knowledge_mode
-    effective_knowledge_session_id = None if request.mode == MODE_NATIVE else request.knowledge_session_id
+    # 2. Strict Mode Isolation & Auto Routing Setup
+    if request.mode == MODE_NATIVE:
+        effective_knowledge_mode = "off"
+        effective_knowledge_session_id = None
+    elif request.mode == MODE_AUTO:
+        # In auto mode: if a session with documents exists, route to document evidence
+        if request.knowledge_session_id and knowledge_store.session_exists(request.knowledge_session_id):
+            sess = knowledge_store.get_session(request.knowledge_session_id)
+            if sess and len(sess.sources) > 0:
+                effective_knowledge_mode = "evidence"
+                effective_knowledge_session_id = request.knowledge_session_id
+            else:
+                effective_knowledge_mode = "off"
+                effective_knowledge_session_id = None
+        else:
+            effective_knowledge_mode = "off"
+            effective_knowledge_session_id = None
+    else:
+        # assisted mode
+        effective_knowledge_mode = request.knowledge_mode
+        effective_knowledge_session_id = request.knowledge_session_id
 
     # 3. Knowledge Evidence Mode (0 model calls) - Only available in Tool-Assisted mode!
     if effective_knowledge_mode == "evidence":
@@ -900,17 +918,33 @@ async def assistant_stream(
         return resp
 
     # 1. Validate mode strictly
-    if request.mode not in (MODE_NATIVE, MODE_ASSISTED):
+    if request.mode not in (MODE_NATIVE, MODE_ASSISTED, MODE_AUTO):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid mode '{request.mode}'. Must be strictly 'native' or 'assisted'.",
+            detail=f"Invalid mode '{request.mode}'. Must be strictly 'native', 'assisted', or 'auto'.",
         )
 
-    # 2. Strict Native GPT Mode Isolation
-    # Under Native GPT mode, knowledge retrieval, safe calculator, and curated facts are strictly inactive.
-    # Forged requests with mode='native' and knowledge_mode!='off' are neutralized to pure neural generation.
-    effective_knowledge_mode = "off" if request.mode == MODE_NATIVE else request.knowledge_mode
-    effective_knowledge_session_id = None if request.mode == MODE_NATIVE else request.knowledge_session_id
+    # 2. Strict Mode Isolation & Auto Routing Setup
+    if request.mode == MODE_NATIVE:
+        effective_knowledge_mode = "off"
+        effective_knowledge_session_id = None
+    elif request.mode == MODE_AUTO:
+        # In auto mode: if a session with documents exists, route to document evidence
+        if request.knowledge_session_id and knowledge_store.session_exists(request.knowledge_session_id):
+            sess = knowledge_store.get_session(request.knowledge_session_id)
+            if sess and len(sess.sources) > 0:
+                effective_knowledge_mode = "evidence"
+                effective_knowledge_session_id = request.knowledge_session_id
+            else:
+                effective_knowledge_mode = "off"
+                effective_knowledge_session_id = None
+        else:
+            effective_knowledge_mode = "off"
+            effective_knowledge_session_id = None
+    else:
+        # assisted mode
+        effective_knowledge_mode = request.knowledge_mode
+        effective_knowledge_session_id = request.knowledge_session_id
 
     # 3. Knowledge Evidence Mode (0 model calls) - Only available in Tool-Assisted mode!
     if effective_knowledge_mode == "evidence":
@@ -1546,6 +1580,50 @@ async def create_knowledge_source(request: KnowledgeSourceCreateRequest) -> Know
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(val_err),
+        )
+
+
+@app.post("/api/knowledge/upload", response_model=KnowledgeSourceResponse, tags=["Knowledge"])
+async def upload_knowledge_file(
+    session_id: str = Form(...),
+    file: UploadFile = File(...),
+) -> KnowledgeSourceResponse:
+    """Safely extract text from uploaded TXT, Markdown, PDF, or DOCX and register into session."""
+    if not session_id or session_id.strip() == "default":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Session ID 'default' is not permitted. Please initialize an isolated knowledge session.",
+        )
+    try:
+        raw_data = await file.read()
+        extracted = extract_text_from_bytes(raw_data, file.filename or "attachment.txt")
+        source = knowledge_store.add_source(
+            session_id=session_id,
+            display_name=extracted.display_name,
+            content=extracted.content,
+            source_type=extracted.source_type,
+        )
+        return KnowledgeSourceResponse(
+            source_id=source.source_id,
+            session_id=source.session_id,
+            display_name=source.display_name,
+            source_type=source.source_type,
+            content_hash=source.content_hash,
+            character_count=source.character_count,
+            token_count=source.token_count,
+            chunk_count=len(source.chunks),
+            created_at=source.created_at,
+            warning=extracted.warning,
+        )
+    except KeyError as k_err:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(k_err))
+    except ValueError as val_err:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(val_err))
+    except Exception as exc:
+        logger.error(f"Failed to process file upload: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to process uploaded file: {str(exc)}",
         )
 
 

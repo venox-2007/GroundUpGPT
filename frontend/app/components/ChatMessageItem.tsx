@@ -17,324 +17,386 @@ export function ChatMessageItem({
   onRegenerate,
 }: ChatMessageItemProps) {
   const isUser = message.role === "user";
-  const [showFactDetails, setShowFactDetails] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
-  // Determine origin display parameters
+  // Copy message text
+  const handleCopy = () => {
+    navigator.clipboard.writeText(message.content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  // Determine truthful origin badge
   const origin = message.origin;
   const isCalculator = origin === "safe_calculator";
   const isLocalFact = origin === "local_fact";
   const isToolError = origin === "tool_error";
-  const isDocumentExcerpt = origin === "document_excerpt";
-  const isGroundedNeural = origin === "grounded_neural";
-  const isNeural = !isUser && (origin === "neural" || isGroundedNeural || (!isCalculator && !isLocalFact && !isToolError && !isDocumentExcerpt));
+  const isDocument = origin === "document_excerpt";
 
-  const getHeaderBadge = () => {
-    if (isUser) {
-      return {
-        initial: "U",
-        iconBg: "bg-slate-700 text-slate-200",
-        label: "You (Prompt)",
-        tag: null,
-      };
-    }
+  const getAttributionPill = () => {
+    if (isUser) return null;
     if (isCalculator) {
       return {
-        initial: "C",
-        iconBg: "bg-sky-600 text-white",
-        label: "SafeCalculator — Computed",
-        tag: "Computed Math",
-        tagBg: "border-sky-800 bg-sky-950/60 text-sky-300",
+        label: "Calculated",
+        className: "bg-sky-950/60 text-sky-300 border-sky-800/80",
       };
     }
     if (isLocalFact) {
       return {
-        initial: "F",
-        iconBg: "bg-emerald-600 text-white",
-        label: "Local Fact — Curated Record",
-        tag: "Curated Fact",
-        tagBg: "border-emerald-800 bg-emerald-950/60 text-emerald-300",
+        label: "Curated Fact",
+        className: "bg-emerald-950/60 text-emerald-300 border-emerald-800/80",
       };
     }
-    if (isDocumentExcerpt) {
+    if (isDocument) {
       return {
-        initial: "D",
-        iconBg: "bg-amber-600 text-white",
-        label: `User Document — ${message.provenance || "Knowledge Excerpt"}`,
-        tag: "Excerpt (0 Model Calls)",
-        tagBg: "border-amber-800 bg-amber-950/60 text-amber-300",
-      };
-    }
-    if (isGroundedNeural) {
-      const profileText = message.modelProfile
-        ? `GroundUpGPT (${message.modelProfile})`
-        : "GroundUpGPT";
-      return {
-        initial: "K",
-        iconBg: "bg-indigo-600 text-white",
-        label: `${profileText} — Grounded Neural`,
-        tag: "Grounded GPT",
-        tagBg: "border-indigo-800 bg-indigo-950/60 text-indigo-300",
+        label: message.provenance ? `From ${message.provenance}` : "From your file",
+        className: "bg-amber-950/60 text-amber-300 border-amber-800/80",
       };
     }
     if (isToolError) {
       return {
-        initial: "!",
-        iconBg: "bg-rose-600 text-white",
-        label: "SafeCalculator — Error",
-        tag: "Tool Error",
-        tagBg: "border-rose-800 bg-rose-950/60 text-rose-300",
+        label: "Tool Error",
+        className: "bg-rose-950/60 text-rose-300 border-rose-800/80",
       };
     }
-    // Neural default
-    const profileText = message.modelProfile
-      ? `GroundUpGPT (${message.modelProfile})`
-      : "GroundUpGPT";
+    // Neural model response
+    const profile = message.modelProfile ? message.modelProfile : "GroundUpGPT";
     return {
-      initial: "G",
-      iconBg: "bg-teal-600 text-white",
-      label: `${profileText} — Neural`,
-      tag: "Neural",
-      tagBg: "border-slate-700 bg-slate-800/60 text-slate-300",
+      label: profile,
+      className: "bg-zinc-800/80 text-zinc-300 border-zinc-700/60",
     };
   };
 
-  const badge = getHeaderBadge();
+  const badge = getAttributionPill();
 
   return (
-    <div
-      className={`group flex w-full flex-col gap-1.5 py-4 ${
-        isUser ? "items-end" : "items-start"
-      }`}
-    >
-      {/* Role and Truthful Origin Header */}
-      <div className="flex items-center gap-2 px-1 text-[11px] font-medium text-slate-400">
-        <span
-          className={`flex h-4 w-4 items-center justify-center rounded text-[10px] font-bold ${badge.iconBg}`}
-        >
-          {badge.initial}
-        </span>
-        <span className="font-semibold text-slate-300">{badge.label}</span>
-        {badge.tag && (
+    <div className={`group flex w-full flex-col py-3 ${isUser ? "items-end" : "items-start"}`}>
+      {/* Turn Header / Attribution */}
+      {!isUser && badge && (
+        <div className="mb-1.5 flex items-center gap-2 px-1 text-xs">
           <span
-            className={`rounded px-1.5 py-0.2 text-[9px] font-mono border ${badge.tagBg}`}
+            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium tracking-wide ${badge.className}`}
           >
-            {badge.tag}
+            {badge.label}
           </span>
-        )}
-      </div>
-
-      {/* Message Content Bubble */}
-      <div
-        className={`max-w-[85%] rounded-lg px-4 py-3 text-sm leading-relaxed sm:max-w-[75%] ${
-          isUser
-            ? "border border-slate-700 bg-slate-800 text-slate-100"
-            : isToolError
-            ? "border border-rose-900/60 bg-slate-900/90 text-rose-200"
-            : "border border-slate-800 bg-slate-900/90 text-slate-200"
-        }`}
-      >
-        {/* SafeCalculator expression breakdown */}
-        {!isUser && isCalculator && message.evaluatedExpression && (
-          <div className="mb-2.5 flex items-center gap-2 rounded border border-sky-900/60 bg-sky-950/30 px-2.5 py-1 text-xs font-mono text-sky-400">
-            <span className="text-slate-400">Expression:</span>
-            <span className="font-semibold text-sky-200">
+          {isCalculator && message.evaluatedExpression && (
+            <span className="font-mono text-[11px] text-zinc-400">
               {message.evaluatedExpression}
             </span>
-            <span className="text-slate-400">=</span>
-            <span className="font-bold text-sky-100">{message.content}</span>
+          )}
+        </div>
+      )}
+
+      {/* Message Content Container */}
+      <div
+        className={`relative max-w-[92%] sm:max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+          isUser
+            ? "bg-[#2f2f32] text-zinc-100 rounded-br-sm shadow-xs"
+            : "text-zinc-200"
+        }`}
+      >
+        {/* If user attached files, display attachment tags in user bubble */}
+        {isUser && message.attachments && message.attachments.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5 border-b border-zinc-600/40 pb-2">
+            {message.attachments.map((att) => (
+              <span
+                key={att.id}
+                className="inline-flex items-center gap-1 rounded-md bg-zinc-800/90 px-2 py-0.5 text-[11px] text-zinc-300 font-medium"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  className="h-3 w-3 text-zinc-400"
+                >
+                  <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+                <span className="truncate max-w-[150px]">{att.name}</span>
+              </span>
+            ))}
           </div>
         )}
 
-        <div className="whitespace-pre-wrap font-sans">
-          {message.content}
+        {/* Content body rendered with Markdown support */}
+        <div className="markdown-content">
+          <RenderMarkdown content={message.content} />
           {message.isStreaming && (
-            <span className="inline-block animate-pulse text-teal-400">▍</span>
+            <span className="inline-block animate-pulse text-zinc-400 ml-1">▍</span>
           )}
         </div>
 
-        {/* Local Fact Expandable Details */}
-        {!isUser && isLocalFact && (
-          <div className="mt-2.5 border-t border-slate-800/80 pt-2 text-xs">
+        {/* Details drawer for Local Facts or Documents (Expandable) */}
+        {!isUser && (isLocalFact || isDocument) && message.details && (
+          <div className="mt-2.5 border-t border-zinc-800/80 pt-2 text-xs">
             <button
               type="button"
-              onClick={() => setShowFactDetails(!showFactDetails)}
-              className="flex items-center gap-1 text-[11px] font-mono text-emerald-400 hover:text-emerald-300 transition"
+              onClick={() => setDetailsOpen(!detailsOpen)}
+              className="text-[11px] font-mono text-zinc-400 hover:text-zinc-200 transition"
             >
-              <span>{showFactDetails ? "▴ Hide Fact Details" : "▾ Curated Fact Details"}</span>
-              {message.factId && (
-                <span className="text-slate-500 font-mono">({message.factId})</span>
-              )}
+              {detailsOpen ? "▴ Hide attribution source" : "▾ View attribution source"}
             </button>
-            {showFactDetails && (
-              <div className="mt-2 space-y-1.5 rounded border border-slate-800 bg-slate-950/70 p-2.5 font-mono text-[11px] text-slate-300">
-                {message.factId && (
-                  <div className="flex gap-2">
-                    <span className="text-slate-500 w-24">Fact ID:</span>
-                    <span className="text-emerald-300 font-semibold">{message.factId}</span>
-                  </div>
-                )}
-                {message.details?.entity && (
-                  <div className="flex gap-2">
-                    <span className="text-slate-500 w-24">Subject:</span>
-                    <span className="text-slate-200">{message.details.entity}</span>
-                  </div>
-                )}
-                <div className="flex gap-2">
-                  <span className="text-slate-500 w-24">Provenance:</span>
-                  <span className="text-slate-300">
-                    {message.provenance || "curated_groundup_facts_v1"}
-                  </span>
-                </div>
-                <div className="flex gap-2">
-                  <span className="text-slate-500 w-24">Version:</span>
-                  <span className="text-slate-300">{message.details?.version || "1.0"}</span>
-                </div>
-                <div className="flex gap-2">
-                  <span className="text-slate-500 w-24">Model gen:</span>
-                  <span className="text-amber-400 font-semibold">false (Deterministic Local)</span>
-                </div>
-                {message.details?.supporting_passage && (
-                  <div className="mt-1.5 pt-1.5 border-t border-slate-800/80 text-[11px] font-sans text-slate-400 italic">
-                    "{message.details.supporting_passage}"
-                  </div>
-                )}
+            {detailsOpen && (
+              <div className="mt-1.5 rounded-lg border border-zinc-800 bg-zinc-900/80 p-2.5 font-mono text-[11px] text-zinc-300 space-y-1">
+                {message.factId && <div><span className="text-zinc-500">Fact ID:</span> {message.factId}</div>}
+                {message.provenance && <div><span className="text-zinc-500">Source:</span> {message.provenance}</div>}
+                {message.details.chunk_id && <div><span className="text-zinc-500">Chunk:</span> {message.details.chunk_id}</div>}
+                {message.details.score !== undefined && <div><span className="text-zinc-500">Relevance Score:</span> {message.details.score}</div>}
               </div>
             )}
           </div>
         )}
 
-        {/* User Document Excerpt or Grounded Details */}
-        {!isUser && (isDocumentExcerpt || isGroundedNeural) && (
-          <div className="mt-2.5 border-t border-slate-800/80 pt-2 text-xs">
+        {/* Action icons row (Copy, Regenerate) */}
+        {!isUser && !message.isStreaming && (
+          <div className="mt-2 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
               type="button"
-              onClick={() => setShowFactDetails(!showFactDetails)}
-              className={`flex items-center gap-1 text-[11px] font-mono transition ${
-                isDocumentExcerpt
-                  ? "text-amber-400 hover:text-amber-300"
-                  : "text-indigo-400 hover:text-indigo-300"
-              }`}
+              onClick={handleCopy}
+              title="Copy response"
+              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition"
             >
-              <span>{showFactDetails ? "▴ Hide Source Evidence" : "▾ Source Document Attribution"}</span>
-              {message.provenance && (
-                <span className="text-slate-400 font-mono">({message.provenance})</span>
-              )}
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-3 w-3"
+              >
+                <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+                <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+              </svg>
+              <span>{copied ? "Copied" : "Copy"}</span>
             </button>
-            {showFactDetails && (
-              <div className="mt-2 space-y-1.5 rounded border border-slate-800 bg-slate-950/70 p-2.5 font-mono text-[11px] text-slate-300">
-                <div className="flex gap-2">
-                  <span className="text-slate-500 w-28">Source Document:</span>
-                  <span className="text-amber-300 font-semibold">{message.provenance || message.details?.source_display_name || "Knowledge"}</span>
-                </div>
-                {message.details?.chunk_id && (
-                  <div className="flex gap-2">
-                    <span className="text-slate-500 w-28">Chunk ID:</span>
-                    <span className="text-slate-200">{message.details.chunk_id}</span>
-                  </div>
-                )}
-                {message.details?.start_char !== undefined && message.details?.end_char !== undefined && (
-                  <div className="flex gap-2">
-                    <span className="text-slate-500 w-28">Offset Span:</span>
-                    <span className="text-slate-200">[{message.details.start_char} : {message.details.end_char}]</span>
-                  </div>
-                )}
-                {message.details?.score !== undefined && (
-                  <div className="flex gap-2">
-                    <span className="text-slate-500 w-28">BM25 Score:</span>
-                    <span className="text-slate-200 font-semibold">{message.details.score}</span>
-                  </div>
-                )}
-                <div className="flex gap-2">
-                  <span className="text-slate-500 w-28">Execution:</span>
-                  <span className="text-slate-300">
-                    {isDocumentExcerpt ? "Raw Document Passage (0 Model Calls)" : "Grounded Prompt Conditioning"}
-                  </span>
-                </div>
-                {message.details?.conflict_detected && (
-                  <div className="mt-2 rounded border border-rose-900/80 bg-rose-950/60 p-2 text-[11px] text-rose-300">
-                    <span className="font-bold">⚠️ Contradiction Warning: </span>
-                    {message.details?.conflict_details?.message || "Contradictory information detected across sources."}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
 
-        {/* Error message card */}
-        {message.error && (
-          <div className="mt-2.5 rounded border border-rose-900/60 bg-rose-950/40 p-2 text-xs text-rose-300">
-            <span className="font-semibold">Error: </span>
-            {message.error}
-          </div>
-        )}
-
-        {/* Real Backend Telemetry Metrics */}
-        {!isUser && message.metrics && (
-          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-800/80 pt-2 font-mono text-[11px] text-slate-400">
-            {isNeural && message.metrics.generatedTokens !== undefined && (
-              <span>
-                Tokens:{" "}
-                <span className="text-slate-200 font-semibold">
-                  {message.metrics.generatedTokens}
-                </span>
-              </span>
+            {isLastAssistant && !isGenerating && onRegenerate && (
+              <button
+                type="button"
+                onClick={onRegenerate}
+                title="Regenerate response"
+                className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  className="h-3 w-3"
+                >
+                  <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                  <path d="M3 3v5h5" />
+                  <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+                  <path d="M16 21h5v-5" />
+                </svg>
+                <span>Regenerate</span>
+              </button>
             )}
-            {isNeural && message.metrics.tokensPerSecond !== undefined && (
-              <span>
-                Speed:{" "}
-                <span className="text-teal-400 font-semibold">
-                  {message.metrics.tokensPerSecond.toFixed(1)} tok/s
-                </span>
-              </span>
-            )}
-            {message.metrics.elapsedTimeSec !== undefined && (
-              <span>
-                Time:{" "}
-                <span className="text-slate-200">
-                  {message.metrics.elapsedTimeSec.toFixed(2)}s
-                </span>
-              </span>
-            )}
-            {!isNeural && (
-              <span className="text-slate-400">
-                Origin:{" "}
-                <span className="text-slate-200 font-semibold">
-                  {message.toolName || origin || "Tool"} (0 model calls)
-                </span>
-              </span>
-            )}
-            {isNeural &&
-              message.metrics.activeContextTokens !== undefined &&
-              message.metrics.contextLimit !== undefined && (
-                <span className="flex items-center gap-1">
-                  Context:{" "}
-                  <span className="text-slate-200">
-                    {message.metrics.activeContextTokens}/
-                    {message.metrics.contextLimit}
-                  </span>
-                  {message.metrics.contextCropped && (
-                    <span className="rounded bg-amber-950 px-1 py-0.2 text-[10px] font-semibold text-amber-400 border border-amber-800">
-                      Cropped
-                    </span>
-                  )}
-                </span>
-              )}
           </div>
         )}
       </div>
-
-      {/* Regenerate Action Button (for neural generations) */}
-      {!isUser && isLastAssistant && !isGenerating && onRegenerate && isNeural && (
-        <button
-          type="button"
-          onClick={onRegenerate}
-          className="mt-1 flex items-center gap-1 px-1 text-[11px] text-slate-400 transition hover:text-teal-400"
-          title="Regenerate this response with current settings"
-        >
-          <span>↺ Regenerate response</span>
-        </button>
-      )}
     </div>
   );
+}
+
+/**
+ * Lightweight, robust markdown parser rendering headings, lists, code blocks, bold, italics, tables.
+ */
+function RenderMarkdown({ content }: { content: string }) {
+  if (!content) return null;
+
+  // Split into code blocks and normal text blocks
+  const parts: React.ReactNode[] = [];
+  const codeBlockRegex = /```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = codeBlockRegex.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(
+        <TextSection key={`text-${lastIndex}`} raw={content.slice(lastIndex, match.index)} />
+      );
+    }
+    const lang = match[1] || "code";
+    const code = match[2];
+    parts.push(<CodeBlock key={`code-${match.index}`} language={lang} code={code} />);
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < content.length) {
+    parts.push(
+      <TextSection key={`text-${lastIndex}`} raw={content.slice(lastIndex)} />
+    );
+  }
+
+  return <div className="space-y-2">{parts}</div>;
+}
+
+function CodeBlock({ language, code }: { language: string; code: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyCode = () => {
+    navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="my-2.5 overflow-hidden rounded-xl border border-zinc-700/80 bg-zinc-950 font-mono text-xs">
+      <div className="flex items-center justify-between border-b border-zinc-800 bg-zinc-900/90 px-3 py-1.5 text-zinc-400">
+        <span className="text-[11px] font-sans lowercase">{language || "code"}</span>
+        <button
+          type="button"
+          onClick={handleCopyCode}
+          className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-white transition"
+        >
+          <span>{copied ? "Copied!" : "Copy code"}</span>
+        </button>
+      </div>
+      <pre className="overflow-x-auto p-3 text-zinc-200 leading-normal">
+        <code>{code.trimEnd()}</code>
+      </pre>
+    </div>
+  );
+}
+
+function TextSection({ raw }: { raw: string }) {
+  const lines = raw.split("\n");
+  const elements: React.ReactNode[] = [];
+  let currentList: React.ReactNode[] = [];
+  let isNumbered = false;
+
+  const flushList = () => {
+    if (currentList.length > 0) {
+      if (isNumbered) {
+        elements.push(
+          <ol key={`ol-${elements.length}`} className="list-decimal pl-5 space-y-1 my-1.5">
+            {currentList}
+          </ol>
+        );
+      } else {
+        elements.push(
+          <ul key={`ul-${elements.length}`} className="list-disc pl-5 space-y-1 my-1.5">
+            {currentList}
+          </ul>
+        );
+      }
+      currentList = [];
+    }
+  };
+
+  lines.forEach((line, idx) => {
+    const trimmed = line.trim();
+
+    // Headers
+    if (trimmed.startsWith("### ")) {
+      flushList();
+      elements.push(
+        <h3 key={`h3-${idx}`} className="text-sm font-semibold text-white mt-2 mb-1">
+          {formatInline(trimmed.slice(4))}
+        </h3>
+      );
+      return;
+    }
+    if (trimmed.startsWith("## ")) {
+      flushList();
+      elements.push(
+        <h2 key={`h2-${idx}`} className="text-base font-semibold text-white mt-2 mb-1">
+          {formatInline(trimmed.slice(3))}
+        </h2>
+      );
+      return;
+    }
+    if (trimmed.startsWith("# ")) {
+      flushList();
+      elements.push(
+        <h1 key={`h1-${idx}`} className="text-lg font-bold text-white mt-2 mb-1">
+          {formatInline(trimmed.slice(2))}
+        </h1>
+      );
+      return;
+    }
+
+    // Bullet lists
+    if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+      if (isNumbered && currentList.length > 0) flushList();
+      isNumbered = false;
+      currentList.push(
+        <li key={`li-${idx}`}>{formatInline(trimmed.slice(2))}</li>
+      );
+      return;
+    }
+
+    // Numbered lists
+    const numMatch = trimmed.match(/^(\d+)\.\s+(.*)/);
+    if (numMatch) {
+      if (!isNumbered && currentList.length > 0) flushList();
+      isNumbered = true;
+      currentList.push(
+        <li key={`li-${idx}`}>{formatInline(numMatch[2])}</li>
+      );
+      return;
+    }
+
+    flushList();
+
+    // Empty line creates break
+    if (!trimmed) {
+      elements.push(<div key={`br-${idx}`} className="h-1.5" />);
+      return;
+    }
+
+    // Normal paragraph
+    elements.push(
+      <p key={`p-${idx}`} className="leading-relaxed">
+        {formatInline(line)}
+      </p>
+    );
+  });
+
+  flushList();
+  return <div className="space-y-1">{elements}</div>;
+}
+
+/**
+ * Format inline bold, italic, and inline code.
+ */
+function formatInline(text: string): React.ReactNode {
+  // Split inline code `...`
+  const codeParts = text.split(/(`[^`]+`)/);
+  return codeParts.map((part, i) => {
+    if (part.startsWith("`") && part.endsWith("`") && part.length > 1) {
+      return (
+        <code
+          key={i}
+          className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[11px] text-zinc-200 border border-zinc-700/60"
+        >
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+
+    // Process bold **...**
+    const boldParts = part.split(/(\*\*[^*]+\*\*)/);
+    return (
+      <span key={i}>
+        {boldParts.map((bPart, j) => {
+          if (bPart.startsWith("**") && bPart.endsWith("**") && bPart.length > 3) {
+            return (
+              <strong key={j} className="font-semibold text-white">
+                {bPart.slice(2, -2)}
+              </strong>
+            );
+          }
+          return bPart;
+        })}
+      </span>
+    );
+  });
 }

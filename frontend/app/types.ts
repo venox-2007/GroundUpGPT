@@ -1,6 +1,17 @@
 export type Role = "user" | "assistant";
 export type KnowledgeMode = "off" | "evidence" | "grounded";
 
+export interface AttachmentItem {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  status: "uploading" | "ready" | "error";
+  error?: string;
+  sourceId?: string;
+  warning?: string;
+}
+
 export interface KnowledgeSource {
   source_id: string;
   session_id: string;
@@ -37,7 +48,7 @@ export interface ChatMessage {
   metrics?: MessageMetrics;
   error?: string;
   modelProfile?: string;
-  mode?: "native" | "assisted";
+  mode?: "native" | "assisted" | "auto";
   origin?: "neural" | "safe_calculator" | "local_fact" | "tool_error" | "document_excerpt" | "grounded_neural" | string;
   toolName?: string;
   factId?: string;
@@ -46,11 +57,12 @@ export interface ChatMessage {
   errorCode?: string;
   modelGenerated?: boolean;
   details?: Record<string, any>;
+  attachments?: AttachmentItem[];
 }
 
 export interface ToolResultEventPayload {
   request_id: string;
-  mode: "native" | "assisted";
+  mode: "native" | "assisted" | "auto";
   origin: "neural" | "safe_calculator" | "local_fact" | "tool_error" | "document_excerpt" | "grounded_neural" | string;
   answer_text: string;
   model_generated: boolean;
@@ -140,6 +152,7 @@ export interface GenerationSettings {
   max_new_tokens: number;
   seed: number | null;
   repetition_penalty?: number | null;
+  nativeOnly?: boolean;
 }
 
 export interface ConversationSummary {
