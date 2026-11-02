@@ -9,6 +9,8 @@ import {
   ModelProfileEntry,
   KnowledgeMode,
   KnowledgeSource,
+  ConversationSummary,
+  ConversationDetail,
 } from "./types";
 import { Sidebar } from "./components/Sidebar";
 import { ChatMessageItem } from "./components/ChatMessageItem";
@@ -44,9 +46,68 @@ export default function ChatPage() {
   const [newDocName, setNewDocName] = useState<string>("");
   const [newDocContent, setNewDocContent] = useState<string>("");
   const [isAddingDoc, setIsAddingDoc] = useState<boolean>(false);
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const fetchConversations = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/history/conversations`);
+      if (res.ok) {
+        const data = await res.json();
+        setConversations(data);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleSelectConversation = async (id: string) => {
+    if (isGenerating) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/history/conversations/${id}`);
+      if (res.ok) {
+        const data: ConversationDetail = await res.json();
+        setActiveConversationId(data.id);
+        const mapped: ChatMessage[] = (data.messages || []).map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          origin: m.origin,
+          modelProfile: m.model_profile ?? undefined,
+          details: m.details,
+        }));
+        setMessages(mapped);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleNewConversation = () => {
+    if (isGenerating) return;
+    setActiveConversationId(null);
+    setMessages([]);
+  };
+
+  const handleDeleteConversation = async (id: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/history/conversations/${id}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        if (activeConversationId === id) {
+          setActiveConversationId(null);
+          setMessages([]);
+        }
+        await fetchConversations();
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   const fetchKnowledgeSources = async () => {
     try {
@@ -103,6 +164,7 @@ export default function ChatPage() {
   // Poll server health & model information on mount
   useEffect(() => {
     fetchKnowledgeSources();
+    fetchConversations();
     async function checkStatus() {
       try {
         const healthRes = await fetch(`${API_BASE_URL}/api/health`);
@@ -174,6 +236,24 @@ export default function ChatPage() {
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
+    let convId = activeConversationId;
+    if (!convId) {
+      try {
+        const createRes = await fetch(`${API_BASE_URL}/api/history/conversations`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: promptText.slice(0, 40) }),
+        });
+        if (createRes.ok) {
+          const newConv = await createRes.json();
+          convId = newConv.id;
+          setActiveConversationId(convId);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     try {
       const response = await fetch(`${API_BASE_URL}/api/assistant/stream`, {
         method: "POST",
@@ -183,6 +263,7 @@ export default function ChatPage() {
           mode: chatMode,
           knowledge_mode: knowledgeMode,
           knowledge_session_id: "default",
+          conversation_id: convId || undefined,
           max_new_tokens: settings.max_new_tokens,
           temperature: settings.temperature,
           top_k: settings.top_k,
@@ -292,6 +373,7 @@ export default function ChatPage() {
     } finally {
       setIsGenerating(false);
       abortControllerRef.current = null;
+      fetchConversations();
     }
   };
 
@@ -354,6 +436,11 @@ export default function ChatPage() {
         isGenerating={isGenerating}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
+        conversations={conversations}
+        activeConversationId={activeConversationId}
+        onSelectConversation={handleSelectConversation}
+        onNewConversation={handleNewConversation}
+        onDeleteConversation={handleDeleteConversation}
       />
 
       {/* Main Chat Interface */}

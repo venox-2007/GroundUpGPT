@@ -47,13 +47,22 @@ from backend.schemas import (
     KnowledgeSourceResponse,
     KnowledgeRetrieveRequest,
     KnowledgeRetrieveResponse,
+    CreateConversationRequest,
+    UpdateConversationRequest,
+    AddMessageRequest,
+    ChatMessageSchema,
+    ConversationSummarySchema,
+    ConversationDetailSchema,
 )
+from src.chat_history import ChatHistoryManager
 from src.generation import GenerationConfig
 from src.user_knowledge import knowledge_store
 from src.user_knowledge_retrieval import UserKnowledgeRetriever
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+chat_history_manager = ChatHistoryManager()
 
 
 @asynccontextmanager
@@ -506,6 +515,22 @@ async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
     req_id = f"ast-{uuid.uuid4().hex[:10]}"
     start_time = time.perf_counter()
 
+    def _finish(resp: AssistantResponse) -> AssistantResponse:
+        if request.conversation_id:
+            try:
+                chat_history_manager.add_message(request.conversation_id, role="user", content=request.prompt)
+                chat_history_manager.add_message(
+                    request.conversation_id,
+                    role="assistant",
+                    content=resp.answer_text,
+                    origin=resp.origin,
+                    model_profile=resp.model_profile,
+                    details=resp.details,
+                )
+            except Exception as e:
+                logger.warning(f"History persistence warning: {e}")
+        return resp
+
     # 1. Validate mode strictly
     if request.mode not in (MODE_NATIVE, MODE_ASSISTED):
         raise HTTPException(
@@ -530,7 +555,7 @@ async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
             ans_text = f"No unambiguous evidence passage found in active knowledge documents (status: {k_res.status})."
             err = k_res.error_code or k_res.status
 
-        return AssistantResponse(
+        return _finish(AssistantResponse(
             request_id=req_id,
             mode=request.mode,
             origin=ORIGIN_DOCUMENT_EXCERPT,
@@ -561,7 +586,7 @@ async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
                 "conflict_details": k_res.conflict_details,
                 "candidates": k_res.candidates,
             },
-        )
+        ))
 
     # 3. Run deterministic router classification (unless grounded knowledge is active and terminal router is not arithmetic)
     decision = assistant_router.classify_and_route(request.prompt, mode=request.mode)
@@ -570,7 +595,7 @@ async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
     # ZERO model calls! No model lock acquired!
     if decision.is_terminal and request.knowledge_mode != "grounded":
         elapsed = time.perf_counter() - start_time
-        return AssistantResponse(
+        return _finish(AssistantResponse(
             request_id=req_id,
             mode=request.mode,
             origin=decision.origin,
@@ -589,12 +614,12 @@ async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
             tokens_per_second=0.0,
             error_code=decision.error_code,
             details=decision.details,
-        )
+        ))
 
     # If arithmetic was identified, calculator always takes terminal precedence even in grounded mode
     if decision.is_terminal and decision.origin == ORIGIN_SAFE_CALCULATOR:
         elapsed = time.perf_counter() - start_time
-        return AssistantResponse(
+        return _finish(AssistantResponse(
             request_id=req_id,
             mode=request.mode,
             origin=decision.origin,
@@ -613,7 +638,7 @@ async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
             tokens_per_second=0.0,
             error_code=decision.error_code,
             details=decision.details,
-        )
+        ))
 
     grounded_chunk = None
     retrieval_details = None
@@ -625,7 +650,7 @@ async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
             # Hallucination Guardrail: do not feed conflicting facts to neural model
             elapsed = time.perf_counter() - start_time
             msg = k_res.conflict_details.get("message") if k_res.conflict_details else "Contradictory records detected."
-            return AssistantResponse(
+            return _finish(AssistantResponse(
                 request_id=req_id,
                 mode=request.mode,
                 origin=ORIGIN_DOCUMENT_EXCERPT,
@@ -650,7 +675,7 @@ async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
                     "status": k_res.status,
                     "candidates": k_res.candidates,
                 },
-            )
+            ))
         elif k_res.status == "relevant_passage" and k_res.chunk:
             grounded_chunk = k_res.chunk
             retrieval_details = {
@@ -776,7 +801,7 @@ async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
     final_tool_name = "UserKnowledgeRetriever" if grounded_chunk else None
     final_provenance = retrieval_details.get("source_display_name") if retrieval_details else None
 
-    return AssistantResponse(
+    return _finish(AssistantResponse(
         request_id=req_id,
         mode=request.mode,
         origin=final_origin,
@@ -795,7 +820,7 @@ async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
         tokens_per_second=round(tok_per_sec, 2),
         error_code=None,
         details=retrieval_details,
-    )
+    ))
 
 
 @app.post("/api/assistant/stream", tags=["Assistant"])
@@ -806,6 +831,22 @@ async def assistant_stream(
     """Stream assistant response using SSE, delivering tool results directly or streaming neural tokens."""
     req_id = f"ast-{uuid.uuid4().hex[:10]}"
     start_time = time.perf_counter()
+
+    def _finish(resp: AssistantResponse) -> AssistantResponse:
+        if request.conversation_id:
+            try:
+                chat_history_manager.add_message(request.conversation_id, role="user", content=request.prompt)
+                chat_history_manager.add_message(
+                    request.conversation_id,
+                    role="assistant",
+                    content=resp.answer_text,
+                    origin=resp.origin,
+                    model_profile=resp.model_profile,
+                    details=resp.details,
+                )
+            except Exception as e:
+                logger.warning(f"History persistence warning: {e}")
+        return resp
 
     # 1. Validate mode strictly
     if request.mode not in (MODE_NATIVE, MODE_ASSISTED):
@@ -832,6 +873,22 @@ async def assistant_stream(
             err = k_res.error_code or k_res.status
 
         async def evidence_stream() -> AsyncIterator[str]:
+            if request.conversation_id:
+                try:
+                    chat_history_manager.add_message(request.conversation_id, role="user", content=request.prompt)
+                    chat_history_manager.add_message(
+                        request.conversation_id,
+                        role="assistant",
+                        content=ans_text,
+                        origin=ORIGIN_DOCUMENT_EXCERPT,
+                        details={
+                            "source_id": k_res.source_id,
+                            "source_display_name": k_res.source_display_name,
+                            "chunk_id": k_res.chunk.chunk_id if k_res.chunk else None,
+                        },
+                    )
+                except Exception as e:
+                    logger.warning(f"History stream persistence error: {e}")
             payload = json.dumps({
                 "request_id": req_id,
                 "mode": request.mode,
@@ -899,6 +956,18 @@ async def assistant_stream(
     # ZERO model calls! No model lock acquired!
     if decision.is_terminal and (request.knowledge_mode != "grounded" or decision.origin == ORIGIN_SAFE_CALCULATOR):
         async def tool_event_stream() -> AsyncIterator[str]:
+            if request.conversation_id:
+                try:
+                    chat_history_manager.add_message(request.conversation_id, role="user", content=request.prompt)
+                    chat_history_manager.add_message(
+                        request.conversation_id,
+                        role="assistant",
+                        content=decision.answer_text or "",
+                        origin=decision.origin,
+                        details=decision.details,
+                    )
+                except Exception as e:
+                    logger.warning(f"History stream persistence error: {e}")
             elapsed = time.perf_counter() - start_time
             tool_payload = json.dumps({
                 "request_id": req_id,
@@ -962,11 +1031,24 @@ async def assistant_stream(
             msg = k_res.conflict_details.get("message") if k_res.conflict_details else "Contradictory records detected."
 
             async def guardrail_stream() -> AsyncIterator[str]:
+                ans_str = f"⚠️ Grounding Guardrail: Conflicting Evidence Detected:\n{msg}\n\nNeural generation halted to prevent hallucinating between contradictory source documents."
+                if request.conversation_id:
+                    try:
+                        chat_history_manager.add_message(request.conversation_id, role="user", content=request.prompt)
+                        chat_history_manager.add_message(
+                            request.conversation_id,
+                            role="assistant",
+                            content=ans_str,
+                            origin=ORIGIN_DOCUMENT_EXCERPT,
+                            details={"conflict_detected": True},
+                        )
+                    except Exception as e:
+                        logger.warning(f"History stream persistence error: {e}")
                 payload = json.dumps({
                     "request_id": req_id,
                     "mode": request.mode,
                     "origin": ORIGIN_DOCUMENT_EXCERPT,
-                    "answer_text": f"⚠️ Grounding Guardrail: Conflicting Evidence Detected:\n{msg}\n\nNeural generation halted to prevent hallucinating between contradictory source documents.",
+                    "answer_text": ans_str,
                     "model_generated": False,
                     "model_profile": None,
                     "tool_name": "UserKnowledgeRetriever",
@@ -1095,6 +1177,7 @@ async def assistant_stream(
         sync_queue: queue.Queue = queue.Queue(maxsize=16)
         cancel_event = threading.Event()
         worker_done = threading.Event()
+        collected_chunks: List[str] = []
 
         def inference_worker() -> None:
             try:
@@ -1155,6 +1238,8 @@ async def assistant_stream(
                         if msg_type == "token":
                             chunk = payload
                             generated_tokens_count += 1
+                            if chunk.text_chunk:
+                                collected_chunks.append(chunk.text_chunk)
                             if chunk.stop_reason:
                                 stream_stop_reason = chunk.stop_reason
                             token_payload = json.dumps({
@@ -1200,6 +1285,21 @@ async def assistant_stream(
             final_origin = ORIGIN_GROUNDED_NEURAL if grounded_chunk else ORIGIN_NEURAL
             final_tool_name = "UserKnowledgeRetriever" if grounded_chunk else None
             final_provenance = retrieval_details.get("source_display_name") if retrieval_details else None
+
+            if request.conversation_id:
+                try:
+                    full_answer = "".join(collected_chunks)
+                    chat_history_manager.add_message(request.conversation_id, role="user", content=request.prompt)
+                    chat_history_manager.add_message(
+                        request.conversation_id,
+                        role="assistant",
+                        content=full_answer,
+                        origin=final_origin,
+                        model_profile=active_profile,
+                        details=retrieval_details,
+                    )
+                except Exception as e:
+                    logger.warning(f"History stream persistence error: {e}")
 
             done_payload = json.dumps({
                 "request_id": req_id,
@@ -1329,4 +1429,87 @@ async def retrieve_knowledge(request: KnowledgeRetrieveRequest) -> KnowledgeRetr
         candidates=res.candidates,
         error_code=res.error_code,
     )
+
+
+# =========================================================================
+# Local Chat History APIs (Step 46)
+# =========================================================================
+
+@app.get("/api/history/conversations", response_model=List[ConversationSummarySchema], tags=["History"])
+async def list_conversations(limit: int = 50, offset: int = 0) -> List[ConversationSummarySchema]:
+    """List saved local conversations ordered by most recently updated."""
+    convs = chat_history_manager.list_conversations(limit=limit, offset=offset)
+    return [ConversationSummarySchema(**c) for c in convs]
+
+
+@app.post("/api/history/conversations", response_model=ConversationSummarySchema, tags=["History"])
+async def create_conversation(request: CreateConversationRequest) -> ConversationSummarySchema:
+    """Create a new local conversation session."""
+    conv = chat_history_manager.create_conversation(title=request.title)
+    return ConversationSummarySchema(**conv)
+
+
+@app.get("/api/history/conversations/{conversation_id}", response_model=ConversationDetailSchema, tags=["History"])
+async def get_conversation(conversation_id: str) -> ConversationDetailSchema:
+    """Fetch complete conversation history and message stream for a session."""
+    conv = chat_history_manager.get_conversation(conversation_id)
+    if not conv:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation '{conversation_id}' not found.",
+        )
+    return ConversationDetailSchema(**conv)
+
+
+@app.patch("/api/history/conversations/{conversation_id}", response_model=ConversationSummarySchema, tags=["History"])
+async def update_conversation_title(conversation_id: str, request: UpdateConversationRequest) -> ConversationSummarySchema:
+    """Update title of an existing conversation."""
+    updated = chat_history_manager.update_conversation_title(conversation_id, request.title)
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation '{conversation_id}' not found.",
+        )
+    conv = chat_history_manager.get_conversation(conversation_id)
+    return ConversationSummarySchema(
+        id=conv["id"],
+        title=conv["title"],
+        created_at=conv["created_at"],
+        updated_at=conv["updated_at"],
+        message_count=conv["message_count"],
+    )
+
+
+@app.delete("/api/history/conversations/{conversation_id}", tags=["History"])
+async def delete_conversation(conversation_id: str) -> dict:
+    """Delete a conversation and all its messages."""
+    deleted = chat_history_manager.delete_conversation(conversation_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation '{conversation_id}' not found.",
+        )
+    return {"success": True, "deleted_conversation_id": conversation_id}
+
+
+@app.delete("/api/history/conversations", tags=["History"])
+async def clear_all_conversations() -> dict:
+    """Clear all saved conversations from local history."""
+    count = chat_history_manager.clear_all_conversations()
+    return {"success": True, "deleted_count": count}
+
+
+@app.post("/api/history/conversations/{conversation_id}/messages", response_model=ChatMessageSchema, tags=["History"])
+async def add_conversation_message(conversation_id: str, request: AddMessageRequest) -> ChatMessageSchema:
+    """Add a message to a conversation."""
+    msg = chat_history_manager.add_message(
+        conversation_id=conversation_id,
+        role=request.role,
+        content=request.content,
+        origin=request.origin,
+        model_profile=request.model_profile,
+        details=request.details,
+    )
+    return ChatMessageSchema(**msg)
+
 

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { HealthStatus, ModelInfo, GenerationSettings, ModelProfileEntry } from "../types";
+import { HealthStatus, ModelInfo, GenerationSettings, ModelProfileEntry, ConversationSummary } from "../types";
 
 interface SidebarProps {
   health: HealthStatus | null;
@@ -15,6 +15,11 @@ interface SidebarProps {
   isGenerating: boolean;
   isOpen: boolean;
   onClose: () => void;
+  conversations?: ConversationSummary[];
+  activeConversationId?: string | null;
+  onSelectConversation?: (id: string) => void;
+  onNewConversation?: () => void;
+  onDeleteConversation?: (id: string) => void;
 }
 
 export function Sidebar({
@@ -29,6 +34,11 @@ export function Sidebar({
   isGenerating,
   isOpen,
   onClose,
+  conversations,
+  activeConversationId,
+  onSelectConversation,
+  onNewConversation,
+  onDeleteConversation,
 }: SidebarProps) {
   const [showSettings, setShowSettings] = useState(true);
 
@@ -143,6 +153,65 @@ export function Sidebar({
             >
               ✕
             </button>
+          </div>
+
+          {/* New Conversation & Saved Sessions (Step 46) */}
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={onNewConversation}
+              disabled={isGenerating}
+              className="flex items-center justify-center gap-2 w-full rounded-md border border-teal-500/40 bg-teal-950/30 px-3 py-2 text-xs font-semibold text-teal-300 hover:bg-teal-900/50 transition disabled:opacity-50"
+            >
+              <span className="text-sm font-bold">+</span>
+              <span>New Conversation</span>
+            </button>
+
+            {conversations && conversations.length > 0 && (
+              <div className="flex flex-col gap-1 mt-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                  Saved Sessions ({conversations.length})
+                </span>
+                <div className="flex flex-col gap-1 max-h-36 overflow-y-auto pr-1">
+                  {conversations.map((c) => {
+                    const isActive = activeConversationId === c.id;
+                    return (
+                      <div
+                        key={c.id}
+                        className={`group flex items-center justify-between rounded px-2 py-1.5 text-xs transition cursor-pointer ${
+                          isActive
+                            ? "bg-slate-800 text-teal-300 font-medium border border-teal-500/40"
+                            : "text-slate-300 hover:bg-slate-800/60"
+                        }`}
+                        onClick={() => onSelectConversation && onSelectConversation(c.id)}
+                      >
+                        <span className="truncate max-w-[170px]" title={c.title}>
+                          {c.title}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] text-slate-400">
+                            {c.message_count}
+                          </span>
+                          {onDeleteConversation && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteConversation(c.id);
+                              }}
+                              className="text-slate-400 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition p-0.5"
+                              title="Delete conversation"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Model Status Pill */}
@@ -593,6 +662,10 @@ export function Sidebar({
                 next-token continuations from prompts.
               </>
             )}
+            <div className="mt-2 text-[10px] text-slate-400 border-t border-slate-800/60 pt-1.5">
+              <span className="font-medium text-slate-300">Single-Turn Prompt Context:</span>{" "}
+              Model is conditioned on the active turn only to strictly adhere to the 256-token limit.
+            </div>
           </div>
         </div>
 

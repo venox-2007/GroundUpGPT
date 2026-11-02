@@ -136,3 +136,31 @@ export interface GenerationSettings {
   seed: number | null;
   repetition_penalty?: number | null;
 }
+
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+}
+
+export interface StoredChatMessage {
+  id: string;
+  conversation_id: string;
+  role: Role;
+  content: string;
+  origin: string;
+  model_profile?: string | null;
+  created_at: string;
+  details?: Record<string, any>;
+}
+
+export interface ConversationDetail {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+  messages: StoredChatMessage[];
+}

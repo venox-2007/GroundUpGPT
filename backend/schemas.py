@@ -192,6 +192,11 @@ class AssistantRequest(BaseModel):
         max_length=64,
         description="Optional session ID for user-ingested knowledge documents.",
     )
+    conversation_id: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description="Optional conversation ID to record message history in local SQLite database.",
+    )
 
     @field_validator("mode")
     @classmethod
@@ -339,5 +344,61 @@ class KnowledgeRetrieveResponse(BaseModel):
     is_ambiguous: bool
     candidates: List[Dict[str, Any]]
     error_code: Optional[str] = None
+
+
+class CreateConversationRequest(BaseModel):
+    """Parameters to create a new local conversation."""
+
+    title: Optional[str] = Field(default=None, max_length=100)
+
+
+class UpdateConversationRequest(BaseModel):
+    """Parameters to update conversation title."""
+
+    title: str = Field(..., min_length=1, max_length=100)
+
+
+class AddMessageRequest(BaseModel):
+    """Parameters to manually record a message into a conversation."""
+
+    role: str = Field(..., pattern="^(user|assistant)$")
+    content: str = Field(..., min_length=1)
+    origin: str = Field(default="neural", max_length=50)
+    model_profile: Optional[str] = Field(default=None, max_length=64)
+    details: Optional[Dict[str, Any]] = None
+
+
+class ChatMessageSchema(BaseModel):
+    """Schema representing an individual stored message."""
+
+    id: str
+    conversation_id: str
+    role: str
+    content: str
+    origin: str
+    model_profile: Optional[str] = None
+    created_at: str
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ConversationSummarySchema(BaseModel):
+    """Schema representing conversation metadata in lists."""
+
+    id: str
+    title: str
+    created_at: str
+    updated_at: str
+    message_count: int
+
+
+class ConversationDetailSchema(BaseModel):
+    """Schema representing full conversation details including messages."""
+
+    id: str
+    title: str
+    created_at: str
+    updated_at: str
+    message_count: int
+    messages: List[ChatMessageSchema] = Field(default_factory=list)
 
 
