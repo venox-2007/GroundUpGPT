@@ -144,21 +144,64 @@ class ModelManager:
         generator = TextGenerator(model, tokenizer, device=target_device)
 
         # 7. Construct Metadata Summary
-        sft_step = checkpoint.get("sft_step")
-        source_step = checkpoint.get("source_step")
-        global_step = checkpoint.get("global_step")
-        if global_step is None and source_step is not None and sft_step is not None:
-            global_step = source_step + sft_step
-        elif global_step is None:
-            global_step = checkpoint.get("step")
-
-        is_sft = sft_step is not None
+        is_anchor_sft = checkpoint.get("anchor_sft_step") is not None
+        legacy_sft_step = checkpoint.get("sft_step")
+        is_sft = is_anchor_sft or (legacy_sft_step is not None)
         model_mode = "chat" if is_sft else "completion"
+
+        anchor_sft_steps = checkpoint.get("anchor_sft_step")
+        if is_anchor_sft:
+            pretrain_steps = checkpoint.get("source_pretrain_step")
+            original_sft_steps = checkpoint.get("prev_sft_step")
+            source_step = pretrain_steps
+            sft_step = (original_sft_steps or 0) + (anchor_sft_steps or 0)
+            global_step = checkpoint.get("global_step")
+            checkpoint_step = global_step
+            source_val_loss = checkpoint.get("source_val_loss")
+
+            anchor_val_loss = checkpoint.get("anchor_val_loss")
+            anchor_val_perplexity = checkpoint.get("anchor_val_ppl")
+            dolly_val_loss = checkpoint.get("dolly_val_loss")
+            dolly_val_perplexity = checkpoint.get("dolly_val_ppl")
+            transfer_test_loss = checkpoint.get("transfer_test_loss")
+            transfer_test_perplexity = checkpoint.get("transfer_test_ppl")
+            lm_val_loss = checkpoint.get("pretrain_lm_loss")
+            lm_val_perplexity = checkpoint.get("pretrain_lm_ppl")
+            sft_val_loss = anchor_val_loss
+            sft_val_perplexity = anchor_val_perplexity
+        else:
+            pretrain_steps = checkpoint.get("source_step")
+            original_sft_steps = legacy_sft_step
+            sft_step = legacy_sft_step
+            source_step = checkpoint.get("source_step")
+            global_step = checkpoint.get("global_step")
+            if global_step is None and source_step is not None and sft_step is not None:
+                global_step = source_step + sft_step
+            elif global_step is None:
+                global_step = checkpoint.get("step")
+
+            checkpoint_step = checkpoint.get("step")
+            if checkpoint_step is None and is_sft:
+                checkpoint_step = global_step
+
+            source_val_loss = checkpoint.get("source_val_loss")
+            anchor_val_loss = None
+            anchor_val_perplexity = None
+            dolly_val_loss = checkpoint.get("sft_val_loss") or checkpoint.get("best_sft_val_loss")
+            dolly_val_perplexity = checkpoint.get("sft_val_perplexity") or checkpoint.get("best_sft_val_perplexity")
+            transfer_test_loss = None
+            transfer_test_perplexity = None
+            lm_val_loss = checkpoint.get("lm_benchmark_val_loss")
+            lm_val_perplexity = checkpoint.get("lm_benchmark_perplexity")
+            sft_val_loss = dolly_val_loss
+            sft_val_perplexity = dolly_val_perplexity
 
         display_profile = model_name
         num_params = model.get_num_params()
         if display_profile is None:
-            if is_sft:
+            if is_anchor_sft:
+                display_profile = f"GroundUpGPT-27M Anchors (Step +{anchor_sft_steps})"
+            elif is_sft:
                 if num_params > 20_000_000:
                     display_profile = f"GroundUpGPT-27M SFT (Step {sft_step})"
                 else:
@@ -171,10 +214,6 @@ class ModelManager:
                 display_profile = "GroundUpGPT-Demo (35K)"
             else:
                 display_profile = f"GroundUpGPT ({num_params:,} params)"
-
-        checkpoint_step = checkpoint.get("step")
-        if checkpoint_step is None and is_sft:
-            checkpoint_step = global_step
 
         model_info = ModelInfoResponse(
             model_name="GroundUpGPT",
@@ -192,20 +231,30 @@ class ModelManager:
             tokenizer_fingerprint=curr_fp,
             device=target_device,
             checkpoint_step=checkpoint_step,
-            checkpoint_val_loss=checkpoint.get("val_loss") or checkpoint.get("sft_val_loss") or checkpoint.get("best_sft_val_loss"),
+            checkpoint_val_loss=checkpoint.get("val_loss") or sft_val_loss,
             original_val_loss=checkpoint.get("original_val_loss"),
             expanded_val_loss=checkpoint.get("expanded_val_loss"),
-            checkpoint_perplexity=checkpoint.get("perplexity") or checkpoint.get("expanded_perplexity") or checkpoint.get("sft_val_perplexity"),
+            checkpoint_perplexity=checkpoint.get("perplexity") or checkpoint.get("expanded_perplexity") or sft_val_perplexity,
             global_step=global_step,
             sft_step=sft_step,
             source_step=source_step,
-            source_val_loss=checkpoint.get("source_val_loss"),
+            source_val_loss=source_val_loss,
             is_sft=is_sft,
             model_mode=model_mode,
-            sft_val_loss=checkpoint.get("sft_val_loss") or checkpoint.get("best_sft_val_loss"),
-            sft_val_perplexity=checkpoint.get("sft_val_perplexity") or checkpoint.get("best_sft_val_perplexity"),
-            lm_val_loss=checkpoint.get("lm_benchmark_val_loss"),
-            lm_val_perplexity=checkpoint.get("lm_benchmark_perplexity"),
+            sft_val_loss=sft_val_loss,
+            sft_val_perplexity=sft_val_perplexity,
+            lm_val_loss=lm_val_loss,
+            lm_val_perplexity=lm_val_perplexity,
+            pretrain_steps=pretrain_steps,
+            original_sft_steps=original_sft_steps,
+            anchor_sft_steps=anchor_sft_steps,
+            anchor_val_loss=anchor_val_loss,
+            anchor_val_perplexity=anchor_val_perplexity,
+            dolly_val_loss=dolly_val_loss,
+            dolly_val_perplexity=dolly_val_perplexity,
+            transfer_test_loss=transfer_test_loss,
+            transfer_test_perplexity=transfer_test_perplexity,
+            is_anchor_sft=is_anchor_sft,
         )
 
         # 8. Atomically assign loaded components only after all validations pass

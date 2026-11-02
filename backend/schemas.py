@@ -100,6 +100,16 @@ class ModelInfoResponse(BaseModel):
     sft_val_perplexity: Optional[float] = None
     lm_val_loss: Optional[float] = None
     lm_val_perplexity: Optional[float] = None
+    pretrain_steps: Optional[int] = None
+    original_sft_steps: Optional[int] = None
+    anchor_sft_steps: Optional[int] = None
+    anchor_val_loss: Optional[float] = None
+    anchor_val_perplexity: Optional[float] = None
+    dolly_val_loss: Optional[float] = None
+    dolly_val_perplexity: Optional[float] = None
+    transfer_test_loss: Optional[float] = None
+    transfer_test_perplexity: Optional[float] = None
+    is_anchor_sft: bool = False
 
 
 class HealthResponse(BaseModel):

@@ -95,6 +95,7 @@ export default function ChatPage() {
       role: "assistant",
       content: "",
       isStreaming: true,
+      modelProfile: modelInfo?.profile_name || activeProfile || "GroundUpGPT",
     };
 
     setMessages((prev) => [...prev, userMsg, assistantMsg]);

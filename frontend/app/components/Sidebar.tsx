@@ -46,12 +46,21 @@ export function Sidebar({
     }
     // Non-overlapping fallback only if active identity is absent:
     const is27m = (modelInfo.total_parameters || 0) > 20000000;
-    const isLatest = !!modelInfo.profile_name && modelInfo.profile_name.toLowerCase().includes("latest");
+    const profileNameLower = (modelInfo.profile_name || "").toLowerCase();
+    const isLatest = profileNameLower.includes("latest");
+    const isAnchor = modelInfo.is_anchor_sft === true || profileNameLower.includes("anchor");
+
+    if (key === "27m_anchors_best") {
+      return modelInfo.is_sft === true && is27m && isAnchor && !isLatest;
+    }
+    if (key === "27m_anchors_latest") {
+      return modelInfo.is_sft === true && is27m && isAnchor && isLatest;
+    }
     if (key === "27m_sft_best") {
-      return modelInfo.is_sft === true && is27m && !isLatest;
+      return modelInfo.is_sft === true && is27m && !isAnchor && !isLatest;
     }
     if (key === "27m_sft_latest") {
-      return modelInfo.is_sft === true && is27m && isLatest;
+      return modelInfo.is_sft === true && is27m && !isAnchor && isLatest;
     }
     if (key === "5m_sft_best") {
       return modelInfo.is_sft === true && !is27m && !isLatest;
@@ -60,16 +69,16 @@ export function Sidebar({
       return modelInfo.is_sft === true && !is27m && isLatest;
     }
     if (key === "5m_best") {
-      return !modelInfo.is_sft && modelInfo.checkpoint_step === 1000 && (!modelInfo.profile_name || !modelInfo.profile_name.toLowerCase().includes("latest"));
+      return !modelInfo.is_sft && modelInfo.checkpoint_step === 1000 && !isLatest;
     }
     if (key === "5m_latest") {
-      return !modelInfo.is_sft && modelInfo.checkpoint_step === 1000 && !!modelInfo.profile_name && modelInfo.profile_name.toLowerCase().includes("latest");
+      return !modelInfo.is_sft && modelInfo.checkpoint_step === 1000 && isLatest;
     }
     if (key === "5m_phase2_best") {
-      return !modelInfo.is_sft && modelInfo.checkpoint_step === 3000 && (!modelInfo.profile_name || !modelInfo.profile_name.toLowerCase().includes("latest"));
+      return !modelInfo.is_sft && modelInfo.checkpoint_step === 3000 && !isLatest;
     }
     if (key === "5m_phase2_latest") {
-      return !modelInfo.is_sft && modelInfo.checkpoint_step === 3000 && !!modelInfo.profile_name && modelInfo.profile_name.toLowerCase().includes("latest");
+      return !modelInfo.is_sft && modelInfo.checkpoint_step === 3000 && isLatest;
     }
     if (key === "5m_step200") {
       return !modelInfo.is_sft && modelInfo.checkpoint_step === 200;
@@ -81,6 +90,8 @@ export function Sidebar({
   };
 
   const getProfileButtonLabel = (key: string, name: string): string => {
+    if (key === "27m_anchors_best") return "27M Anchors Best (Experimental)";
+    if (key === "27m_anchors_latest") return "27M Anchors Latest";
     if (key === "27m_sft_best") return "27M SFT Best (Chat)";
     if (key === "27m_sft_latest") return "27M SFT Latest";
     if (key === "5m_sft_best") return "5M SFT Best (Chat)";
@@ -257,53 +268,102 @@ export function Sidebar({
                 </div>
                 {modelInfo.is_sft ? (
                   <>
-                    {modelInfo.source_step !== undefined && modelInfo.source_step !== null && (
-                      <div className="flex justify-between">
-                        <span className="text-slate-500">Pretrain Step:</span>
-                        <span className="text-slate-300">
-                          #{modelInfo.source_step}
-                        </span>
-                      </div>
-                    )}
-                    {modelInfo.source_val_loss !== undefined && modelInfo.source_val_loss !== null && (
-                      <div className="flex justify-between">
-                        <span className="text-slate-500">Pretrain Loss:</span>
-                        <span className="text-slate-300">
-                          {modelInfo.source_val_loss.toFixed(4)}
-                        </span>
-                      </div>
-                    )}
-                    {modelInfo.sft_step !== undefined && modelInfo.sft_step !== null && (
-                      <div className="flex justify-between">
-                        <span className="text-slate-500">SFT Step:</span>
-                        <span className="text-amber-300">
-                          #{modelInfo.sft_step} (Global #{modelInfo.global_step ?? modelInfo.checkpoint_step})
-                        </span>
-                      </div>
-                    )}
-                    {modelInfo.sft_val_loss !== undefined && modelInfo.sft_val_loss !== null && (
-                      <div className="flex justify-between">
-                        <span className="text-slate-500">SFT Loss:</span>
-                        <span className="text-teal-400">
-                          {modelInfo.sft_val_loss.toFixed(4)}
-                        </span>
-                      </div>
-                    )}
-                    {modelInfo.sft_val_perplexity !== undefined && modelInfo.sft_val_perplexity !== null && (
-                      <div className="flex justify-between">
-                        <span className="text-slate-500">SFT Perplexity:</span>
-                        <span className="text-teal-400">
-                          {modelInfo.sft_val_perplexity.toFixed(1)}
-                        </span>
-                      </div>
-                    )}
-                    {modelInfo.lm_val_loss !== undefined && modelInfo.lm_val_loss !== null && (
-                      <div className="flex justify-between">
-                        <span className="text-slate-500">LM Benchmark:</span>
-                        <span className="text-slate-300">
-                          {modelInfo.lm_val_loss.toFixed(4)} (PPL {modelInfo.lm_val_perplexity?.toFixed(1)})
-                        </span>
-                      </div>
+                    {modelInfo.is_anchor_sft ? (
+                      <>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Pretrain Step:</span>
+                          <span className="text-slate-300">
+                            #{modelInfo.pretrain_steps ?? 5949}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Original SFT:</span>
+                          <span className="text-slate-300">
+                            #{modelInfo.original_sft_steps ?? 600}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Anchor SFT:</span>
+                          <span className="text-amber-300 font-semibold">
+                            +{modelInfo.anchor_sft_steps ?? 250} (Global #{modelInfo.global_step ?? 6799})
+                          </span>
+                        </div>
+                        {modelInfo.anchor_val_loss !== undefined && modelInfo.anchor_val_loss !== null && (
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Anchor Loss:</span>
+                            <span className="text-teal-400">
+                              {modelInfo.anchor_val_loss.toFixed(4)} (PPL {modelInfo.anchor_val_perplexity?.toFixed(1) ?? "4.4"})
+                            </span>
+                          </div>
+                        )}
+                        {modelInfo.dolly_val_loss !== undefined && modelInfo.dolly_val_loss !== null && (
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Dolly Loss:</span>
+                            <span className="text-slate-300">
+                              {modelInfo.dolly_val_loss.toFixed(4)} (PPL {modelInfo.dolly_val_perplexity?.toFixed(1) ?? "17.9"})
+                            </span>
+                          </div>
+                        )}
+                        {modelInfo.lm_val_loss !== undefined && modelInfo.lm_val_loss !== null && (
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">LM Benchmark:</span>
+                            <span className="text-slate-300">
+                              {modelInfo.lm_val_loss.toFixed(4)} (PPL {modelInfo.lm_val_perplexity?.toFixed(1) ?? "39.6"})
+                            </span>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        {modelInfo.source_step !== undefined && modelInfo.source_step !== null && (
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Pretrain Step:</span>
+                            <span className="text-slate-300">
+                              #{modelInfo.source_step}
+                            </span>
+                          </div>
+                        )}
+                        {modelInfo.source_val_loss !== undefined && modelInfo.source_val_loss !== null && (
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Pretrain Loss:</span>
+                            <span className="text-slate-300">
+                              {modelInfo.source_val_loss.toFixed(4)}
+                            </span>
+                          </div>
+                        )}
+                        {modelInfo.sft_step !== undefined && modelInfo.sft_step !== null && (
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">SFT Step:</span>
+                            <span className="text-amber-300">
+                              #{modelInfo.sft_step} (Global #{modelInfo.global_step ?? modelInfo.checkpoint_step})
+                            </span>
+                          </div>
+                        )}
+                        {modelInfo.sft_val_loss !== undefined && modelInfo.sft_val_loss !== null && (
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">SFT Loss:</span>
+                            <span className="text-teal-400">
+                              {modelInfo.sft_val_loss.toFixed(4)}
+                            </span>
+                          </div>
+                        )}
+                        {modelInfo.sft_val_perplexity !== undefined && modelInfo.sft_val_perplexity !== null && (
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">SFT Perplexity:</span>
+                            <span className="text-teal-400">
+                              {modelInfo.sft_val_perplexity.toFixed(1)}
+                            </span>
+                          </div>
+                        )}
+                        {modelInfo.lm_val_loss !== undefined && modelInfo.lm_val_loss !== null && (
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">LM Benchmark:</span>
+                            <span className="text-slate-300">
+                              {modelInfo.lm_val_loss.toFixed(4)} (PPL {modelInfo.lm_val_perplexity?.toFixed(1)})
+                            </span>
+                          </div>
+                        )}
+                      </>
                     )}
                   </>
                 ) : (

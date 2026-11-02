@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-CUDA%20Accelerated-EE4C2C.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Completed (Steps 1-40)](https://img.shields.io/badge/Status-Completed%20(Steps%201--40)-brightgreen.svg)]()
+[![Status: Completed (Steps 1-41)](https://img.shields.io/badge/Status-Completed%20(Steps%201--41)-brightgreen.svg)]()
 
 GroundUpGPT is an educational and engineering project dedicated to designing, implementing, training, evaluating, and deploying a small autoregressive, decoder-only Transformer language model completely from scratch using Python and PyTorch.
 
@@ -1491,6 +1491,60 @@ Implemented BlendedSFTDataPipeline (src/sft_data.py) blending Dolly 15k and anch
 3. **Classification & Definition Precision**: On binary and category classification, responses became direct and authoritative (e.g., Wood is an insulator, A carrot is a vegetable, A whale is a mammal).
 4. **Zero Catastrophic Forgetting**: Preserving a 72/28 target token blend between Dolly and anchors prevented catastrophic forgetting of broader pretraining and instruction-following abilities.
 
+---
+
+## Step 41 — Reliable Conversational Evaluation and Experimental 27M Model Integration
+
+Step 41 established a rigorous, task-specific evaluation framework to separate genuine factual and arithmetic correctness from keyword matching, format changes, and partial responses, while exposing the Step 40 anchor fine-tuned model as an explicitly selectable experimental profile in the web chat application.
+
+### 1. Task-Specific Evaluation Framework (`src/conversation_evaluation.py`)
+
+Replaced loose heuristic regexes with deterministic, category-specific evaluation rubrics with explicit denominators:
+- **Numeric Arithmetic**: Parses question operands and operator, evaluates mathematically in Python, and strictly rejects responses where the model alters question operands (e.g., `65 divided by 8 is 8` when asked `What is 64 divided by 8?` is marked as a strict failure). Rejects incorrect calculations (e.g., `7 + 9 = 10`) and extraneous contradictory numbers (e.g., `102 4 years old` for `2 + 2`).
+- **Exact Factual QA**: Rejects prompt echoing without assertion (e.g. `The capital of Japan`) and tautological loops (e.g. `The capital of Japan's capital of Japan`). Requires exact entity assertion.
+- **Scientific Definitions**: Requires core explanatory concepts rather than circular repetitions (e.g. `A mammal.` or `The gravity is in Australia` rejected; requires warm-blooded, vertebrate, milk, or fur).
+- **Classification**: Binary classification requires assertion of the correct category and absence of opposing category (`Wood is an insulator` passes; asserting both or contradictory fails). Multi-item classification requires exhaustive, correct placement of all named items.
+- **Requested N-Item Lists**: Strictly enforces list counts (listing 1 or 2 items when 3 are requested fails).
+- **Open-Ended Etiquette**: Greetings, thanks, and open advice are classified as qualitative review items (`is_objective=False, passed=None`) rather than artificially inflating objective score percentages.
+
+### 2. Revised Strict Benchmark Results (Regraded Step 40 Generations)
+
+Re-scoring the exact identical 111 prompt generations from Step 40 under the strict evaluation engine revealed the true factual baseline:
+
+| Benchmark Suite | Model Checkpoint | Decoding Strategy | Objective Scored | Objective Correct | Strict Accuracy (%) | Median Length | Natural Stop Rate (%) |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **Frozen 35** | Baseline (Step 600) | Greedy ($T=0$) | 23 | 0 | **0.0%** | 52 tok (cutoff) | 28.6% |
+| **Frozen 35** | Target (Anchors Best) | Greedy ($T=0$) | 23 | 0 | **0.0%** | **23 tok** | **68.6%** |
+| **Frozen 35** | Baseline (Step 600) | Calibrated ($T=0.8$) | 23 | 0 | **0.0%** | 52 tok (cutoff) | 31.4% |
+| **Frozen 35** | Target (Anchors Best) | Calibrated ($T=0.8$) | 23 | 0 | **0.0%** | **25 tok** | **85.7%** |
+| **Anchor Transfer Test** | Baseline (Step 600) | Greedy ($T=0$) | 26 | 0 | **0.0%** | 52 tok (cutoff) | 28.6% |
+| **Anchor Transfer Test** | Target (Anchors Best) | Greedy ($T=0$) | 26 | 1 | **3.8%** | **24 tok** | **67.9%** |
+| **Anchor Transfer Test** | Baseline (Step 600) | Calibrated ($T=0.8$) | 26 | 1 | **3.8%** | 52 tok (cutoff) | 37.5% |
+| **Anchor Transfer Test** | Target (Anchors Best) | Calibrated ($T=0.8$) | 26 | 1 | **3.8%** | **24 tok** | **91.1%** |
+| **Seen Anchor Train** | Baseline (Step 600) | Greedy ($T=0$) | 14 | 2 | **14.3%** | 52 tok (cutoff) | 15.0% |
+| **Seen Anchor Train** | Target (Anchors Best) | Greedy ($T=0$) | 14 | 2 | **14.3%** | **24 tok** | **70.0%** |
+| **Seen Anchor Train** | Baseline (Step 600) | Calibrated ($T=0.8$) | 14 | 0 | **0.0%** | 52 tok (cutoff) | 25.0% |
+| **Seen Anchor Train** | Target (Anchors Best) | Calibrated ($T=0.8$) | 14 | 1 | **7.1%** | **24 tok** | **90.0%** |
+
+*Transfer-Test Monitoring Caveat*: The 56 transfer examples were periodically monitored during Step 40 training at intervals of 50 steps; thus, they serve as a transfer monitoring set rather than a completely untouched final test.
+
+### 3. Backend & Checkpoint Schema Compatibility Fix
+
+Resolved metadata divergence in `backend/model_loader.py` and `backend/schemas.py`:
+- Step 40 checkpoints saved `anchor_sft_step: 250`, `prev_sft_step: 600`, and `source_pretrain_step: 5949` rather than legacy `sft_step`.
+- Backward-compatible loader now detects anchor fine-tuned checkpoints, setting `is_sft = True` and `model_mode = "chat"`.
+- Separate metadata exposed: pretraining steps (`#5949`), original SFT steps (`#600`), anchor SFT steps (`+#250`), global step (`#6799`), anchor validation loss (`1.4802`), Dolly validation loss (`2.8864`), and LM benchmark loss (`3.6792`).
+- Registered trusted profiles: `27m_anchors_best` and `27m_anchors_latest` while preserving `27m_sft_best`, `27m_sft_latest`, and all 5M models.
+
+### 4. Browser UI & Model Comparison Integration
+
+- Sidebar model profile switcher updated with `27M Anchors Best (Experimental)` and `27M Anchors Latest` buttons.
+- Profile buttons accurately reflect active backend canonical profile identity rather than parameter counts.
+- Active model info card presents distinct training telemetry for both standard SFT and anchor SFT models.
+- Chat message headers identify the generating model profile (`GroundUpGPT (27M Anchors Best (Experimental))` vs `GroundUpGPT (27M SFT Best (Chat))`).
+- Windows launcher verified with `-CheckOnly` preflight passing cleanly.
+
+
 
 ---
 
@@ -1539,4 +1593,5 @@ Implemented BlendedSFTDataPipeline (src/sft_data.py) blending Dolly 15k and anch
   - **Step 38 — GroundUpGPT-27M SFT Web Chat Integration**: Integrated the 27,411,456-parameter instruction-tuned model (`27m_sft_best`, `27m_sft_latest`) into the existing FastAPI backend and Next.js chat interface. Preserved backward compatibility with all 5M models, implemented concurrent switching with state rollback and CUDA cache reclamation, multi-token BPE delimiter formatting, strict 256-token context limit validation, real-time SSE streaming, and calibrated decoding defaults (`temp=0.8, top_k=40, top_p=0.9, rep_penalty=1.15`). Benchmarked 10 conversational prompts against 5M baseline (27M: 438.8 MB peak VRAM, ~102 tok/s; 5M: 91.9 MB peak VRAM, ~111 tok/s). Verified with 9/9 focused unit tests (`tests/test_27m_ui_integration.py`), Next.js production build (`npm run build`), and full test suite (231/231 passing).
   - **Step 39 — Conversational Failure Diagnosis, Training-Signal Audit, and Controlled Learning Probe**: Executed comprehensive diagnostic audit of GroundUpGPT-27M conversational behavior. Audited and fixed prompt-length accounting definition in `src/sft_data.py` with backward-compatible loading, verified 100.0% token sequence match across all 9,370 Dolly train/val examples, verified supervised loss correctness (causal shift and target masking), analyzed Dolly 15k composition (0 greetings, 0 acknowledgements, 0 arithmetic; 79.5 avg response tokens), demonstrated strong prompt conditioning (96% win rate over mismatched prompts; 65x first-token probability boost), implemented conservative grading benchmark across Base 27M, SFT 27M, and SFT 5M, and executed controlled 32-sample overfitting probe driving loss to 0.0006 with 100% verbatim memorization in 39.9s on RTX 3050 GPU, proving the 27M Transformer architecture and training pipeline are completely sound. Verified with 8/8 unit tests (`tests/test_27m_conversation_diagnostics.py`) and full repository suite (239/239 passing).
   - **Step 40 — Targeted Conversational Fine-Tuning with Verified Short-Answer Anchors**: Reconciled Step 39 reporting discrepancies, engineered a verified 430-example conversational anchor dataset across 11 categories (data/cache_sft_anchors_v1/, 321 train, 53 val, 56 held-out transfer test) with 0 collisions against protected benchmarks and disjoint arithmetic/concept splits. Implemented BlendedSFTDataPipeline delivering 54.8% anchor samples and 28.4% anchor active target tokens. Executed bounded 250-step SFT run (2.77 min on RTX 3050 Laptop GPU): Anchor validation loss dropped from 1.9411 to **1.4802** (-37.0% perplexity), transfer test loss dropped from 1.8503 to **1.4331** (-34.1% perplexity), while Dolly validation loss (+0.33% drift) and pretraining LM loss (+0.90% drift) remained preserved without catastrophic forgetting. Saved checkpoints in checkpoints/27m_sft_anchors_v1/ (model_27m_anchors_best.pt, model_27m_anchors_latest.pt). Conducted 111-prompt comparative benchmark across Frozen 35, Transfer Test, and Seen Train under greedy and calibrated decoding: demonstrated dramatic response length reduction (median 52 -> 23–25 tokens), clean delimiter termination, high accuracy on classification/definitions, structural equation syntax, and documented arithmetic computation capacity limits. Verified with 8/8 unit tests (	ests/test_27m_anchor_sft.py) and full repository test suite (247/247 passing).
-- **Roadmap Complete**: Phase 13 completed through Step 40! All 40 steps complete.
+  - **Step 41 — Reliable Conversational Evaluation and Experimental 27M Model Integration**: Built deterministic task-specific conversation evaluation engine (`src/conversation_evaluation.py`) with strict rubrics for arithmetic, factual QA, scientific definitions, classification, and list counting. Re-scored all 111 Step 40 benchmark generations, eliminating regex false positives and establishing honest baselines (Frozen 35: 0/23, Transfer Test: 1/26, Seen Train: 2/14). Fixed backend metadata schema compatibility for anchor checkpoints (`prev_sft_step: 600`, `anchor_sft_step: 250`, `pretrain_steps: 5949`), registered `27m_anchors_best` and `27m_anchors_latest` experimental chat profiles, updated Next.js sidebar and message attribution, verified Windows launcher preflight, and validated end-to-end functionality with 13 new unit/integration tests (`tests/test_conversation_evaluation.py`, `tests/test_27m_anchor_ui_integration.py`). Verified with full repository test suite (260/260 passing) and Next.js production build (`npm run build`).
+- **Roadmap Complete**: Phase 13 completed through Step 41! All 41 steps complete.

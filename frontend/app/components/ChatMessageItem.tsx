@@ -33,7 +33,13 @@ export function ChatMessageItem({
         >
           {isUser ? "U" : "G"}
         </span>
-        <span>{isUser ? "You (Prompt)" : "GroundUpGPT (Completion)"}</span>
+        <span>
+          {isUser
+            ? "You (Prompt)"
+            : message.modelProfile
+            ? `GroundUpGPT (${message.modelProfile})`
+            : "GroundUpGPT (Completion)"}
+        </span>
       </div>
 
       {/* Message Content Bubble */}

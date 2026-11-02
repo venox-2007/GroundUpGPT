@@ -18,6 +18,7 @@ export interface ChatMessage {
   isStreaming?: boolean;
   metrics?: MessageMetrics;
   error?: string;
+  modelProfile?: string;
 }
 
 export interface ModelInfo {
@@ -50,6 +51,16 @@ export interface ModelInfo {
   sft_val_perplexity?: number | null;
   lm_val_loss?: number | null;
   lm_val_perplexity?: number | null;
+  pretrain_steps?: number | null;
+  original_sft_steps?: number | null;
+  anchor_sft_steps?: number | null;
+  anchor_val_loss?: number | null;
+  anchor_val_perplexity?: number | null;
+  dolly_val_loss?: number | null;
+  dolly_val_perplexity?: number | null;
+  transfer_test_loss?: number | null;
+  transfer_test_perplexity?: number | null;
+  is_anchor_sft?: boolean;
 }
 
 export interface ModelProfileEntry {
