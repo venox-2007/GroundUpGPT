@@ -16,6 +16,10 @@ venv.bak/
 # Keep directory structure via .gitkeep
 data/*
 !data/.gitkeep
+!data/benchmarks/
+!data/benchmarks/**
+!data/sft/
+!data/sft/**
 
 # Model Checkpoints, Weights & Artifacts
 checkpoints/

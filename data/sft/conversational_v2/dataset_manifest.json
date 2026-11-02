@@ -1,0 +1,26 @@
+{
+  "dataset_name": "sft_conversational_v2",
+  "created_at": "Step 48",
+  "total_examples": 850,
+  "train_examples": 722,
+  "val_examples": 128,
+  "categories": [
+    "arithmetic",
+    "basic_science",
+    "concise_constraint_responses",
+    "definitions",
+    "elementary_classification",
+    "everyday_conversational",
+    "greetings_persona",
+    "python_concepts",
+    "short_direct_facts",
+    "simple_logical_relationships",
+    "single_step_instructions",
+    "small_lists"
+  ],
+  "avg_prompt_tokens": 29.52,
+  "avg_response_tokens": 23.13,
+  "benchmark_collisions": 0,
+  "sha256_train": "5f03fc0ec4ebdcdc998923c0c7e3f4a89f4887c0171fa4fab6fee98df9c0c47d",
+  "sha256_val": "1cee22e401af57d30133e7a7afc0670be52823b739e8ecc62ac2bfcdaabd1a1f"
+}

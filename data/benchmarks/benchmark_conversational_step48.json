@@ -1,0 +1,1189 @@
+{
+  "benchmark_name": "Step 48 Frozen Held-Out Conversational Benchmark",
+  "version": "1.0",
+  "num_items": 84,
+  "num_categories": 12,
+  "categories": [
+    "greetings_acknowledgements",
+    "short_direct_facts",
+    "everyday_conversational",
+    "definitions",
+    "basic_science",
+    "python_concepts",
+    "elementary_classification",
+    "single_step_instructions",
+    "small_lists",
+    "simple_logical_relationships",
+    "arithmetic",
+    "concise_constraint_responses"
+  ],
+  "prompts": [
+    {
+      "id": "B01",
+      "category": "greetings_acknowledgements",
+      "prompt": "Hello! How are you today?",
+      "expected_answer": "Hello! I am doing well, thank you. How can I help you today?",
+      "acceptable_equivalents": [
+        "hello",
+        "doing well",
+        "how can i help"
+      ],
+      "task_type": "open_ended_conversational",
+      "is_objective": false,
+      "evaluation_criteria": "Polite greeting, relevant conversational opening, no prompt echo, no hallucinated jargon"
+    },
+    {
+      "id": "B02",
+      "category": "greetings_acknowledgements",
+      "prompt": "Good morning, how are you doing?",
+      "expected_answer": "Good morning! I am doing well. How are you?",
+      "acceptable_equivalents": [
+        "good morning",
+        "doing well"
+      ],
+      "task_type": "open_ended_conversational",
+      "is_objective": false,
+      "evaluation_criteria": "Polite morning greeting and helpful inquiry"
+    },
+    {
+      "id": "B03",
+      "category": "greetings_acknowledgements",
+      "prompt": "Thank you for your help!",
+      "expected_answer": "You are very welcome! Let me know if you need anything else.",
+      "acceptable_equivalents": [
+        "welcome",
+        "glad to help",
+        "anytime"
+      ],
+      "task_type": "open_ended_conversational",
+      "is_objective": false,
+      "evaluation_criteria": "Gracious acknowledgement response"
+    },
+    {
+      "id": "B04",
+      "category": "greetings_acknowledgements",
+      "prompt": "Hi there, nice to meet you.",
+      "expected_answer": "Nice to meet you too! How can I assist you today?",
+      "acceptable_equivalents": [
+        "nice to meet you",
+        "pleasure"
+      ],
+      "task_type": "open_ended_conversational",
+      "is_objective": false,
+      "evaluation_criteria": "Friendly polite greeting"
+    },
+    {
+      "id": "B05",
+      "category": "greetings_acknowledgements",
+      "prompt": "Good evening, how is everything going?",
+      "expected_answer": "Good evening! Everything is going well, thank you. What can I do for you?",
+      "acceptable_equivalents": [
+        "good evening",
+        "going well"
+      ],
+      "task_type": "open_ended_conversational",
+      "is_objective": false,
+      "evaluation_criteria": "Polite evening greeting"
+    },
+    {
+      "id": "B06",
+      "category": "greetings_acknowledgements",
+      "prompt": "Hey, can you help me with a question?",
+      "expected_answer": "Of course! What question would you like help with?",
+      "acceptable_equivalents": [
+        "yes",
+        "sure",
+        "of course",
+        "happy to help"
+      ],
+      "task_type": "open_ended_conversational",
+      "is_objective": false,
+      "evaluation_criteria": "Affirmative willing response to assist"
+    },
+    {
+      "id": "B07",
+      "category": "greetings_acknowledgements",
+      "prompt": "Thanks a lot, that was great.",
+      "expected_answer": "You are welcome! I am glad that was helpful.",
+      "acceptable_equivalents": [
+        "welcome",
+        "glad",
+        "pleasure"
+      ],
+      "task_type": "open_ended_conversational",
+      "is_objective": false,
+      "evaluation_criteria": "Polite polite closing acknowledgement"
+    },
+    {
+      "id": "B08",
+      "category": "short_direct_facts",
+      "prompt": "What is the capital of France?",
+      "expected_answer": "Paris",
+      "acceptable_equivalents": [
+        "Paris",
+        "The capital of France is Paris."
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts Paris as the capital"
+    },
+    {
+      "id": "B09",
+      "category": "short_direct_facts",
+      "prompt": "What is the capital of Japan?",
+      "expected_answer": "Tokyo",
+      "acceptable_equivalents": [
+        "Tokyo",
+        "The capital of Japan is Tokyo."
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts Tokyo as the capital"
+    },
+    {
+      "id": "B10",
+      "category": "short_direct_facts",
+      "prompt": "What is the largest ocean on Earth?",
+      "expected_answer": "Pacific Ocean",
+      "acceptable_equivalents": [
+        "Pacific",
+        "Pacific Ocean",
+        "the Pacific"
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts Pacific Ocean"
+    },
+    {
+      "id": "B11",
+      "category": "short_direct_facts",
+      "prompt": "Who wrote the play Romeo and Juliet?",
+      "expected_answer": "William Shakespeare",
+      "acceptable_equivalents": [
+        "Shakespeare",
+        "William Shakespeare"
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts Shakespeare"
+    },
+    {
+      "id": "B12",
+      "category": "short_direct_facts",
+      "prompt": "On which continent is Brazil located?",
+      "expected_answer": "South America",
+      "acceptable_equivalents": [
+        "South America"
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts South America"
+    },
+    {
+      "id": "B13",
+      "category": "short_direct_facts",
+      "prompt": "What is the official currency of the United Kingdom?",
+      "expected_answer": "Pound sterling",
+      "acceptable_equivalents": [
+        "pound",
+        "pound sterling",
+        "british pound",
+        "gbp"
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts Pound / Pound sterling"
+    },
+    {
+      "id": "B14",
+      "category": "short_direct_facts",
+      "prompt": "What is the highest mountain above sea level on Earth?",
+      "expected_answer": "Mount Everest",
+      "acceptable_equivalents": [
+        "Everest",
+        "Mount Everest"
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts Mount Everest"
+    },
+    {
+      "id": "B15",
+      "category": "everyday_conversational",
+      "prompt": "What should I wear when it is raining outside?",
+      "expected_answer": "You should wear a raincoat or carry an umbrella and wear waterproof shoes.",
+      "acceptable_equivalents": [
+        "raincoat",
+        "umbrella",
+        "jacket",
+        "waterproof"
+      ],
+      "task_type": "open_ended_conversational",
+      "is_objective": false,
+      "evaluation_criteria": "Suggests rain protection (umbrella, raincoat, boots)"
+    },
+    {
+      "id": "B16",
+      "category": "everyday_conversational",
+      "prompt": "Why do humans need to sleep every night?",
+      "expected_answer": "Sleep allows the body and brain to rest, repair tissues, and consolidate memories.",
+      "acceptable_equivalents": [
+        "rest",
+        "recover",
+        "repair",
+        "health",
+        "energy"
+      ],
+      "task_type": "open_ended_conversational",
+      "is_objective": false,
+      "evaluation_criteria": "Explains rest, recovery, memory, or bodily repair"
+    },
+    {
+      "id": "B17",
+      "category": "everyday_conversational",
+      "prompt": "How do you make a hot cup of tea?",
+      "expected_answer": "Boil water, pour it over a tea bag or leaves in a cup, steep for a few minutes, and remove the tea bag.",
+      "acceptable_equivalents": [
+        "boil water",
+        "steep",
+        "tea bag",
+        "hot water"
+      ],
+      "task_type": "open_ended_conversational",
+      "is_objective": false,
+      "evaluation_criteria": "Mentions boiling/hot water and steeping tea"
+    },
+    {
+      "id": "B18",
+      "category": "everyday_conversational",
+      "prompt": "What should you do if you feel cold?",
+      "expected_answer": "You can put on a warm jacket or sweater, use a blanket, or drink a hot beverage.",
+      "acceptable_equivalents": [
+        "jacket",
+        "blanket",
+        "sweater",
+        "warm clothes",
+        "heat"
+      ],
+      "task_type": "open_ended_conversational",
+      "is_objective": false,
+      "evaluation_criteria": "Recommends warm clothing, blanket, or heating"
+    },
+    {
+      "id": "B19",
+      "category": "everyday_conversational",
+      "prompt": "Why is it important to brush your teeth?",
+      "expected_answer": "Brushing teeth removes plaque and food particles, preventing tooth decay and gum disease.",
+      "acceptable_equivalents": [
+        "prevent cavities",
+        "cavities",
+        "plaque",
+        "clean",
+        "hygiene"
+      ],
+      "task_type": "open_ended_conversational",
+      "is_objective": false,
+      "evaluation_criteria": "Mentions hygiene, plaque, cavities, or dental health"
+    },
+    {
+      "id": "B20",
+      "category": "everyday_conversational",
+      "prompt": "What is a good way to relax after a long day?",
+      "expected_answer": "Taking a warm bath, reading a book, listening to calm music, or going for a walk are great ways to relax.",
+      "acceptable_equivalents": [
+        "reading",
+        "music",
+        "walk",
+        "rest",
+        "bath",
+        "exercise"
+      ],
+      "task_type": "open_ended_conversational",
+      "is_objective": false,
+      "evaluation_criteria": "Mentions plausible relaxing activities"
+    },
+    {
+      "id": "B21",
+      "category": "everyday_conversational",
+      "prompt": "Why should we wash our hands before eating?",
+      "expected_answer": "Washing hands removes germs and bacteria that could otherwise cause illness.",
+      "acceptable_equivalents": [
+        "germs",
+        "bacteria",
+        "clean",
+        "prevent illness",
+        "hygiene"
+      ],
+      "task_type": "open_ended_conversational",
+      "is_objective": false,
+      "evaluation_criteria": "Explains removing germs/bacteria to prevent illness"
+    },
+    {
+      "id": "B22",
+      "category": "definitions",
+      "prompt": "Define photosynthesis in one simple sentence.",
+      "expected_answer": "Photosynthesis is the process by which green plants use sunlight to convert carbon dioxide and water into food energy.",
+      "acceptable_equivalents": [
+        "plants use sunlight",
+        "process by which plants",
+        "light into energy"
+      ],
+      "task_type": "scientific_definitions",
+      "is_objective": true,
+      "evaluation_criteria": "Defines process where plants use light/sunlight to make energy/food"
+    },
+    {
+      "id": "B23",
+      "category": "definitions",
+      "prompt": "What is a mammal?",
+      "expected_answer": "A mammal is a warm-blooded vertebrate animal with hair or fur that produces milk for its young.",
+      "acceptable_equivalents": [
+        "warm-blooded",
+        "vertebrate",
+        "fur",
+        "milk"
+      ],
+      "task_type": "scientific_definitions",
+      "is_objective": true,
+      "evaluation_criteria": "Defines warm-blooded vertebrate with hair/fur or milk production"
+    },
+    {
+      "id": "B24",
+      "category": "definitions",
+      "prompt": "What is an algorithm?",
+      "expected_answer": "An algorithm is a step-by-step set of instructions or rules designed to solve a problem or perform a task.",
+      "acceptable_equivalents": [
+        "step-by-step",
+        "set of instructions",
+        "rules to solve a problem"
+      ],
+      "task_type": "scientific_definitions",
+      "is_objective": true,
+      "evaluation_criteria": "Explains step-by-step rules or instructions to solve a problem"
+    },
+    {
+      "id": "B25",
+      "category": "definitions",
+      "prompt": "Define gravity in one sentence.",
+      "expected_answer": "Gravity is the natural force that attracts objects toward one another, such as pulling objects toward the Earth.",
+      "acceptable_equivalents": [
+        "force that attracts",
+        "pulls objects",
+        "force of attraction"
+      ],
+      "task_type": "scientific_definitions",
+      "is_objective": true,
+      "evaluation_criteria": "Explains attractive gravitational force pulling mass/objects"
+    },
+    {
+      "id": "B26",
+      "category": "definitions",
+      "prompt": "What is a peninsula?",
+      "expected_answer": "A peninsula is a piece of land that is surrounded by water on three sides while connected to a mainland.",
+      "acceptable_equivalents": [
+        "surrounded by water on three sides",
+        "water on three sides",
+        "bordered by water on three sides"
+      ],
+      "task_type": "scientific_definitions",
+      "is_objective": true,
+      "evaluation_criteria": "Identifies land surrounded by water on three sides"
+    },
+    {
+      "id": "B27",
+      "category": "definitions",
+      "prompt": "What is an ecosystem?",
+      "expected_answer": "An ecosystem is a biological community of interacting organisms and their physical environment.",
+      "acceptable_equivalents": [
+        "community of organisms",
+        "living organisms and their environment",
+        "plants, animals and environment"
+      ],
+      "task_type": "scientific_definitions",
+      "is_objective": true,
+      "evaluation_criteria": "Describes community of interacting living organisms and environment"
+    },
+    {
+      "id": "B28",
+      "category": "definitions",
+      "prompt": "What is velocity in physics?",
+      "expected_answer": "Velocity is the rate of change of an object position with respect to time in a specified direction.",
+      "acceptable_equivalents": [
+        "speed in a given direction",
+        "speed in a direction",
+        "rate of change of position"
+      ],
+      "task_type": "scientific_definitions",
+      "is_objective": true,
+      "evaluation_criteria": "Defines speed with direction or directional rate of change"
+    },
+    {
+      "id": "B29",
+      "category": "basic_science",
+      "prompt": "What planet is closest to the Sun?",
+      "expected_answer": "Mercury",
+      "acceptable_equivalents": [
+        "Mercury"
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts Mercury"
+    },
+    {
+      "id": "B30",
+      "category": "basic_science",
+      "prompt": "What is the chemical formula for water?",
+      "expected_answer": "H2O",
+      "acceptable_equivalents": [
+        "H2O",
+        "H\u2082O"
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts H2O"
+    },
+    {
+      "id": "B31",
+      "category": "basic_science",
+      "prompt": "Why does the sky appear blue during the daytime?",
+      "expected_answer": "The sky appears blue because molecules in Earth atmosphere scatter short-wavelength blue light more than other colors (Rayleigh scattering).",
+      "acceptable_equivalents": [
+        "scatter",
+        "scattering",
+        "rayleigh scattering",
+        "blue light is scattered"
+      ],
+      "task_type": "scientific_definitions",
+      "is_objective": true,
+      "evaluation_criteria": "Explains scattering of light by atmosphere"
+    },
+    {
+      "id": "B32",
+      "category": "basic_science",
+      "prompt": "What primary gas do green plants absorb from the air?",
+      "expected_answer": "Carbon dioxide",
+      "acceptable_equivalents": [
+        "carbon dioxide",
+        "CO2"
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts carbon dioxide / CO2"
+    },
+    {
+      "id": "B33",
+      "category": "basic_science",
+      "prompt": "What state of matter is liquid water when it freezes?",
+      "expected_answer": "Solid",
+      "acceptable_equivalents": [
+        "solid",
+        "ice"
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts solid or ice"
+    },
+    {
+      "id": "B34",
+      "category": "basic_science",
+      "prompt": "What is the boiling point of pure water at sea level in degrees Celsius?",
+      "expected_answer": "100 degrees Celsius",
+      "acceptable_equivalents": [
+        "100",
+        "100 C",
+        "100 degrees",
+        "100 \u00b0C"
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts 100 degrees"
+    },
+    {
+      "id": "B35",
+      "category": "basic_science",
+      "prompt": "Which organ in the human body pumps blood?",
+      "expected_answer": "Heart",
+      "acceptable_equivalents": [
+        "heart",
+        "the heart"
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts heart"
+    },
+    {
+      "id": "B36",
+      "category": "python_concepts",
+      "prompt": "What does the len() function do in Python?",
+      "expected_answer": "The len() function returns the number of items or length of an object.",
+      "acceptable_equivalents": [
+        "length",
+        "number of items",
+        "number of elements",
+        "returns the length"
+      ],
+      "task_type": "scientific_definitions",
+      "is_objective": true,
+      "evaluation_criteria": "Explains returns length / count of items"
+    },
+    {
+      "id": "B37",
+      "category": "python_concepts",
+      "prompt": "What is the key difference between a Python list and a Python tuple?",
+      "expected_answer": "Lists are mutable (can be changed) while tuples are immutable (cannot be changed).",
+      "acceptable_equivalents": [
+        "mutable",
+        "immutable",
+        "lists can be changed",
+        "tuples cannot be modified"
+      ],
+      "task_type": "scientific_definitions",
+      "is_objective": true,
+      "evaluation_criteria": "Explains mutability vs immutability"
+    },
+    {
+      "id": "B38",
+      "category": "python_concepts",
+      "prompt": "Which Python keyword is used to define a function?",
+      "expected_answer": "def",
+      "acceptable_equivalents": [
+        "def",
+        "the def keyword"
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts def"
+    },
+    {
+      "id": "B39",
+      "category": "python_concepts",
+      "prompt": "What Python keyword is used to loop over elements of an iterable?",
+      "expected_answer": "for",
+      "acceptable_equivalents": [
+        "for",
+        "for loop"
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts for"
+    },
+    {
+      "id": "B40",
+      "category": "python_concepts",
+      "prompt": "What does the print() function do in Python?",
+      "expected_answer": "The print() function outputs text or data to the console or screen.",
+      "acceptable_equivalents": [
+        "outputs",
+        "displays",
+        "prints to console",
+        "writes to screen"
+      ],
+      "task_type": "scientific_definitions",
+      "is_objective": true,
+      "evaluation_criteria": "Explains printing / displaying output to console"
+    },
+    {
+      "id": "B41",
+      "category": "python_concepts",
+      "prompt": "What boolean value does the Python expression 5 > 3 return?",
+      "expected_answer": "True",
+      "acceptable_equivalents": [
+        "True"
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts True"
+    },
+    {
+      "id": "B42",
+      "category": "python_concepts",
+      "prompt": "What data type in Python represents whole numbers without decimals?",
+      "expected_answer": "int",
+      "acceptable_equivalents": [
+        "int",
+        "integer"
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts int / integer"
+    },
+    {
+      "id": "B43",
+      "category": "elementary_classification",
+      "prompt": "Is a sparrow a bird or a mammal?",
+      "expected_answer": "bird",
+      "acceptable_equivalents": [
+        "bird",
+        "A sparrow is a bird."
+      ],
+      "task_type": "binary_classification",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts bird and rejects mammal"
+    },
+    {
+      "id": "B44",
+      "category": "elementary_classification",
+      "prompt": "Is an apple a fruit or a vegetable?",
+      "expected_answer": "fruit",
+      "acceptable_equivalents": [
+        "fruit",
+        "An apple is a fruit."
+      ],
+      "task_type": "binary_classification",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts fruit and rejects vegetable"
+    },
+    {
+      "id": "B45",
+      "category": "elementary_classification",
+      "prompt": "Is iron a metal or a gas?",
+      "expected_answer": "metal",
+      "acceptable_equivalents": [
+        "metal",
+        "Iron is a metal."
+      ],
+      "task_type": "binary_classification",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts metal and rejects gas"
+    },
+    {
+      "id": "B46",
+      "category": "elementary_classification",
+      "prompt": "Is the Pacific an ocean or a continent?",
+      "expected_answer": "ocean",
+      "acceptable_equivalents": [
+        "ocean",
+        "The Pacific is an ocean."
+      ],
+      "task_type": "binary_classification",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts ocean and rejects continent"
+    },
+    {
+      "id": "B47",
+      "category": "elementary_classification",
+      "prompt": "Is nitrogen a chemical element or a musical instrument?",
+      "expected_answer": "chemical element",
+      "acceptable_equivalents": [
+        "element",
+        "chemical element"
+      ],
+      "task_type": "binary_classification",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts element / chemical element"
+    },
+    {
+      "id": "B48",
+      "category": "elementary_classification",
+      "prompt": "Is Python a programming language or an operating system?",
+      "expected_answer": "programming language",
+      "acceptable_equivalents": [
+        "programming language"
+      ],
+      "task_type": "binary_classification",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts programming language"
+    },
+    {
+      "id": "B49",
+      "category": "elementary_classification",
+      "prompt": "Is a square a 2D shape or a 3D object?",
+      "expected_answer": "2D shape",
+      "acceptable_equivalents": [
+        "2d",
+        "2D",
+        "2D shape",
+        "two-dimensional"
+      ],
+      "task_type": "binary_classification",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts 2D / 2D shape"
+    },
+    {
+      "id": "B50",
+      "category": "single_step_instructions",
+      "prompt": "Say the single word elephant.",
+      "expected_answer": "elephant",
+      "acceptable_equivalents": [
+        "elephant",
+        "Elephant"
+      ],
+      "task_type": "deterministic_text_transformation",
+      "is_objective": true,
+      "evaluation_criteria": "Produces elephant"
+    },
+    {
+      "id": "B51",
+      "category": "single_step_instructions",
+      "prompt": "Convert the word hello to uppercase.",
+      "expected_answer": "HELLO",
+      "acceptable_equivalents": [
+        "HELLO"
+      ],
+      "task_type": "deterministic_text_transformation",
+      "is_objective": true,
+      "evaluation_criteria": "Produces HELLO in uppercase"
+    },
+    {
+      "id": "B52",
+      "category": "single_step_instructions",
+      "prompt": "Spell the three-letter word cat in reverse order.",
+      "expected_answer": "tac",
+      "acceptable_equivalents": [
+        "tac",
+        "TAC"
+      ],
+      "task_type": "deterministic_text_transformation",
+      "is_objective": true,
+      "evaluation_criteria": "Produces tac"
+    },
+    {
+      "id": "B53",
+      "category": "single_step_instructions",
+      "prompt": "Write the numbers 1 to 3 separated by spaces.",
+      "expected_answer": "1 2 3",
+      "acceptable_equivalents": [
+        "1 2 3"
+      ],
+      "task_type": "deterministic_text_transformation",
+      "is_objective": true,
+      "evaluation_criteria": "Produces 1 2 3"
+    },
+    {
+      "id": "B54",
+      "category": "single_step_instructions",
+      "prompt": "Repeat the word echo exactly twice.",
+      "expected_answer": "echo echo",
+      "acceptable_equivalents": [
+        "echo echo",
+        "Echo echo",
+        "echo, echo"
+      ],
+      "task_type": "deterministic_text_transformation",
+      "is_objective": true,
+      "evaluation_criteria": "Produces echo twice"
+    },
+    {
+      "id": "B55",
+      "category": "single_step_instructions",
+      "prompt": "Output only the single word completed.",
+      "expected_answer": "completed",
+      "acceptable_equivalents": [
+        "completed",
+        "Completed"
+      ],
+      "task_type": "deterministic_text_transformation",
+      "is_objective": true,
+      "evaluation_criteria": "Produces completed"
+    },
+    {
+      "id": "B56",
+      "category": "single_step_instructions",
+      "prompt": "Capitalize the first letter of the word sunshine.",
+      "expected_answer": "Sunshine",
+      "acceptable_equivalents": [
+        "Sunshine"
+      ],
+      "task_type": "deterministic_text_transformation",
+      "is_objective": true,
+      "evaluation_criteria": "Produces Sunshine"
+    },
+    {
+      "id": "B57",
+      "category": "small_lists",
+      "prompt": "Name three primary colors of light or paint.",
+      "expected_answer": "Red, blue, and yellow (or red, green, and blue for light).",
+      "acceptable_equivalents": [
+        "red",
+        "blue",
+        "yellow",
+        "green"
+      ],
+      "task_type": "requested_n_item_lists",
+      "is_objective": true,
+      "evaluation_criteria": "Names at least 3 distinct primary colors from {red, blue, yellow, green}"
+    },
+    {
+      "id": "B58",
+      "category": "small_lists",
+      "prompt": "List three continents on Earth.",
+      "expected_answer": "Africa, Asia, and Europe.",
+      "acceptable_equivalents": [
+        "africa",
+        "asia",
+        "europe",
+        "north america",
+        "south america",
+        "antarctica",
+        "australia"
+      ],
+      "task_type": "requested_n_item_lists",
+      "is_objective": true,
+      "evaluation_criteria": "Lists at least 3 distinct valid continents"
+    },
+    {
+      "id": "B59",
+      "category": "small_lists",
+      "prompt": "Give two examples of citrus fruits.",
+      "expected_answer": "Orange and lemon.",
+      "acceptable_equivalents": [
+        "orange",
+        "lemon",
+        "lime",
+        "grapefruit",
+        "tangerine"
+      ],
+      "task_type": "requested_n_item_lists",
+      "is_objective": true,
+      "evaluation_criteria": "Lists at least 2 distinct citrus fruits"
+    },
+    {
+      "id": "B60",
+      "category": "small_lists",
+      "prompt": "Name three seasons of the year.",
+      "expected_answer": "Spring, summer, and autumn.",
+      "acceptable_equivalents": [
+        "spring",
+        "summer",
+        "autumn",
+        "fall",
+        "winter"
+      ],
+      "task_type": "requested_n_item_lists",
+      "is_objective": true,
+      "evaluation_criteria": "Lists at least 3 distinct seasons"
+    },
+    {
+      "id": "B61",
+      "category": "small_lists",
+      "prompt": "List two animals that live primarily in the water.",
+      "expected_answer": "Fish and dolphin.",
+      "acceptable_equivalents": [
+        "fish",
+        "whale",
+        "dolphin",
+        "shark",
+        "seal",
+        "octopus"
+      ],
+      "task_type": "requested_n_item_lists",
+      "is_objective": true,
+      "evaluation_criteria": "Lists at least 2 distinct aquatic animals"
+    },
+    {
+      "id": "B62",
+      "category": "small_lists",
+      "prompt": "Name three popular programming languages.",
+      "expected_answer": "Python, JavaScript, and Java.",
+      "acceptable_equivalents": [
+        "python",
+        "javascript",
+        "java",
+        "c++",
+        "c#",
+        "rust",
+        "go",
+        "c"
+      ],
+      "task_type": "requested_n_item_lists",
+      "is_objective": true,
+      "evaluation_criteria": "Lists at least 3 distinct programming languages"
+    },
+    {
+      "id": "B63",
+      "category": "small_lists",
+      "prompt": "List two planets in our solar system other than Earth.",
+      "expected_answer": "Mars and Jupiter.",
+      "acceptable_equivalents": [
+        "mars",
+        "venus",
+        "jupiter",
+        "saturn",
+        "mercury",
+        "neptune",
+        "uranus"
+      ],
+      "task_type": "requested_n_item_lists",
+      "is_objective": true,
+      "evaluation_criteria": "Lists at least 2 distinct solar system planets other than Earth"
+    },
+    {
+      "id": "B64",
+      "category": "simple_logical_relationships",
+      "prompt": "If today is Monday, what day of the week is tomorrow?",
+      "expected_answer": "Tuesday",
+      "acceptable_equivalents": [
+        "Tuesday",
+        "Tomorrow is Tuesday."
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts Tuesday"
+    },
+    {
+      "id": "B65",
+      "category": "simple_logical_relationships",
+      "prompt": "If all roses are flowers, is a red rose a flower?",
+      "expected_answer": "Yes, a red rose is a flower.",
+      "acceptable_equivalents": [
+        "yes",
+        "Yes",
+        "is a flower"
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Affirms yes"
+    },
+    {
+      "id": "B66",
+      "category": "simple_logical_relationships",
+      "prompt": "Which is heavier: one kilogram of iron or one kilogram of cotton?",
+      "expected_answer": "They weigh the same amount (both are one kilogram).",
+      "acceptable_equivalents": [
+        "same",
+        "equal",
+        "neither",
+        "weigh the same",
+        "both weigh 1 kg"
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts they are equal / weigh the same"
+    },
+    {
+      "id": "B67",
+      "category": "simple_logical_relationships",
+      "prompt": "If John is older than Mary, and Mary is older than Tom, who is the oldest person?",
+      "expected_answer": "John is the oldest person.",
+      "acceptable_equivalents": [
+        "John",
+        "John is the oldest"
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts John"
+    },
+    {
+      "id": "B68",
+      "category": "simple_logical_relationships",
+      "prompt": "If you turn 180 degrees from facing north, which direction are you facing?",
+      "expected_answer": "South",
+      "acceptable_equivalents": [
+        "South",
+        "facing south"
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts South"
+    },
+    {
+      "id": "B69",
+      "category": "simple_logical_relationships",
+      "prompt": "Is ice hotter or colder than boiling water?",
+      "expected_answer": "colder",
+      "acceptable_equivalents": [
+        "colder",
+        "Ice is colder."
+      ],
+      "task_type": "binary_classification",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts colder"
+    },
+    {
+      "id": "B70",
+      "category": "simple_logical_relationships",
+      "prompt": "If an object accelerates forward in a straight line, does its speed increase or decrease?",
+      "expected_answer": "increase",
+      "acceptable_equivalents": [
+        "increase",
+        "increases",
+        "speed increases"
+      ],
+      "task_type": "binary_classification",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts increase"
+    },
+    {
+      "id": "B71",
+      "category": "arithmetic",
+      "prompt": "What is 8 plus 7?",
+      "expected_answer": "15",
+      "acceptable_equivalents": [
+        "15",
+        "8 + 7 = 15"
+      ],
+      "task_type": "numeric_arithmetic",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts 15"
+    },
+    {
+      "id": "B72",
+      "category": "arithmetic",
+      "prompt": "What is 35 minus 14?",
+      "expected_answer": "21",
+      "acceptable_equivalents": [
+        "21",
+        "35 - 14 = 21"
+      ],
+      "task_type": "numeric_arithmetic",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts 21"
+    },
+    {
+      "id": "B73",
+      "category": "arithmetic",
+      "prompt": "What is 6 times 7?",
+      "expected_answer": "42",
+      "acceptable_equivalents": [
+        "42",
+        "6 * 7 = 42"
+      ],
+      "task_type": "numeric_arithmetic",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts 42"
+    },
+    {
+      "id": "B74",
+      "category": "arithmetic",
+      "prompt": "What is 48 divided by 6?",
+      "expected_answer": "8",
+      "acceptable_equivalents": [
+        "8",
+        "48 / 6 = 8"
+      ],
+      "task_type": "numeric_arithmetic",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts 8"
+    },
+    {
+      "id": "B75",
+      "category": "arithmetic",
+      "prompt": "What is 19 plus 23?",
+      "expected_answer": "42",
+      "acceptable_equivalents": [
+        "42",
+        "19 + 23 = 42"
+      ],
+      "task_type": "numeric_arithmetic",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts 42"
+    },
+    {
+      "id": "B76",
+      "category": "arithmetic",
+      "prompt": "What is 50 minus 18?",
+      "expected_answer": "32",
+      "acceptable_equivalents": [
+        "32",
+        "50 - 18 = 32"
+      ],
+      "task_type": "numeric_arithmetic",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts 32"
+    },
+    {
+      "id": "B77",
+      "category": "arithmetic",
+      "prompt": "What is 9 times 4?",
+      "expected_answer": "36",
+      "acceptable_equivalents": [
+        "36",
+        "9 * 4 = 36"
+      ],
+      "task_type": "numeric_arithmetic",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts 36"
+    },
+    {
+      "id": "B78",
+      "category": "concise_constraint_responses",
+      "prompt": "Answer in exactly one word: What color is fresh grass?",
+      "expected_answer": "Green",
+      "acceptable_equivalents": [
+        "green",
+        "Green"
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Single word green"
+    },
+    {
+      "id": "B79",
+      "category": "concise_constraint_responses",
+      "prompt": "Reply with only yes or no: Do fish live in water?",
+      "expected_answer": "Yes",
+      "acceptable_equivalents": [
+        "yes",
+        "Yes"
+      ],
+      "task_type": "binary_classification",
+      "is_objective": true,
+      "evaluation_criteria": "Strictly yes"
+    },
+    {
+      "id": "B80",
+      "category": "concise_constraint_responses",
+      "prompt": "In one short sentence, state what clocks measure.",
+      "expected_answer": "Clocks measure time.",
+      "acceptable_equivalents": [
+        "time",
+        "clocks measure time"
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts that clocks measure time"
+    },
+    {
+      "id": "B81",
+      "category": "concise_constraint_responses",
+      "prompt": "Answer in one single word: What is the opposite of hot?",
+      "expected_answer": "Cold",
+      "acceptable_equivalents": [
+        "cold",
+        "Cold"
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Single word cold"
+    },
+    {
+      "id": "B82",
+      "category": "concise_constraint_responses",
+      "prompt": "Reply with only true or false: The Sun is a star.",
+      "expected_answer": "True",
+      "acceptable_equivalents": [
+        "true",
+        "True"
+      ],
+      "task_type": "binary_classification",
+      "is_objective": true,
+      "evaluation_criteria": "Strictly true"
+    },
+    {
+      "id": "B83",
+      "category": "concise_constraint_responses",
+      "prompt": "Answer with only a number: How many days are in a standard week?",
+      "expected_answer": "7",
+      "acceptable_equivalents": [
+        "7",
+        "seven"
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Asserts 7"
+    },
+    {
+      "id": "B84",
+      "category": "concise_constraint_responses",
+      "prompt": "Answer in exactly one word: What sweet substance do honeybees produce?",
+      "expected_answer": "Honey",
+      "acceptable_equivalents": [
+        "honey",
+        "Honey"
+      ],
+      "task_type": "exact_factual_qa",
+      "is_objective": true,
+      "evaluation_criteria": "Single word honey"
+    }
+  ]
+}
