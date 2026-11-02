@@ -10,12 +10,22 @@ import queue
 import threading
 import time
 from typing import AsyncIterator
+import uuid
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from backend import __version__
+from backend.assistant_router import (
+    assistant_router,
+    MODE_NATIVE,
+    MODE_ASSISTED,
+    ORIGIN_NEURAL,
+    ORIGIN_SAFE_CALCULATOR,
+    ORIGIN_LOCAL_FACT,
+    ORIGIN_TOOL_ERROR,
+)
 from backend.config import (
     get_settings,
     MODEL_PROFILES,
@@ -24,6 +34,8 @@ from backend.config import (
 )
 from backend.model_loader import model_manager
 from backend.schemas import (
+    AssistantRequest,
+    AssistantResponse,
     GenerateRequest,
     GenerateResponse,
     HealthResponse,
@@ -468,3 +480,429 @@ async def generate_text_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Dedicated Assistant Routing Endpoints (Native vs Tool-Assisted)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/assistant/telemetry", tags=["Assistant"])
+async def get_assistant_telemetry() -> dict:
+    """Return execution telemetry counters for validating zero model calls."""
+    return model_manager.get_telemetry_counters()
+
+
+@app.post("/api/assistant/respond", response_model=AssistantResponse, tags=["Assistant"])
+async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
+    """Execute conservative deterministic routing to answer via tools or fallback to neural GPT."""
+    req_id = f"ast-{uuid.uuid4().hex[:10]}"
+    start_time = time.perf_counter()
+
+    # 1. Validate mode strictly
+    if request.mode not in (MODE_NATIVE, MODE_ASSISTED):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid mode '{request.mode}'. Must be strictly 'native' or 'assisted'.",
+        )
+
+    # 2. Run deterministic router classification
+    decision = assistant_router.classify_and_route(request.prompt, mode=request.mode)
+
+    # 3. If decision is terminal (safe_calculator, local_fact, or tool_error):
+    # ZERO model calls! No model lock acquired!
+    if decision.is_terminal:
+        elapsed = time.perf_counter() - start_time
+        return AssistantResponse(
+            request_id=req_id,
+            mode=request.mode,
+            origin=decision.origin,
+            answer_text=decision.answer_text or "",
+            model_generated=False,
+            model_profile=None,
+            tool_name=decision.tool_name,
+            fact_id=decision.fact_id,
+            provenance=decision.provenance,
+            evaluated_expression=decision.evaluated_expression,
+            stop_reason="tool_complete",
+            prompt_tokens=0,
+            generated_tokens=0,
+            total_tokens=0,
+            elapsed_time_sec=round(elapsed, 4),
+            tokens_per_second=0.0,
+            error_code=decision.error_code,
+            details=decision.details,
+        )
+
+    # 4. Neural generation fallback path
+    if not model_manager.is_loaded or model_manager.generator is None or model_manager.model is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Model is not loaded. Run 'python scripts/generate_demo.py' or load a checkpoint profile.",
+        )
+
+    is_sft = bool(model_manager.model_info and getattr(model_manager.model_info, "is_sft", False))
+
+    if is_sft:
+        from src.generation import format_sft_prompt
+        prompt_to_run = format_sft_prompt(request.prompt)
+    else:
+        prompt_to_run = request.prompt
+
+    try:
+        prompt_ids = model_manager.generator.tokenizer.encode(prompt_to_run)
+        prompt_tokens_count = len(prompt_ids)
+    except Exception as encode_err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to encode prompt: {encode_err}",
+        )
+
+    block_size = model_manager.model.config.block_size if model_manager.model else 256
+    if is_sft and prompt_tokens_count >= block_size:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Prompt length ({prompt_tokens_count} tokens) exceeds or equals maximum context of {block_size} tokens.",
+        )
+
+    config = GenerationConfig(
+        max_new_tokens=request.max_new_tokens,
+        temperature=request.temperature,
+        top_k=request.top_k,
+        top_p=request.top_p,
+        seed=request.seed,
+        repetition_penalty=request.repetition_penalty,
+    )
+
+    worker_result = {}
+    worker_error = []
+
+    def run_generate() -> None:
+        try:
+            assert model_manager.generator is not None
+            model_manager.inference_call_count += 1
+            if is_sft:
+                from src.generation import generate_sft_response
+                res = generate_sft_response(model_manager.generator, prompt=request.prompt, config=config)
+            else:
+                res = model_manager.generator.generate(prompt=request.prompt, config=config)
+            model_manager.tokens_generated_count += res.generated_tokens
+            worker_result["result"] = res
+        except Exception as exc:
+            worker_error.append(exc)
+
+    async with model_manager.lock:
+        thread = threading.Thread(
+            target=run_generate,
+            name=f"ast-generate-{time.time_ns()}",
+            daemon=True,
+        )
+        thread.start()
+        try:
+            while thread.is_alive():
+                await asyncio.sleep(0.01)
+        except asyncio.CancelledError:
+            while thread.is_alive():
+                await asyncio.sleep(0.01)
+            raise
+
+    if worker_error:
+        exc = worker_error[0]
+        logger.error(f"Assistant generation error: {exc}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Inference execution failed: {str(exc)}",
+        )
+
+    res = worker_result["result"]
+    elapsed = time.perf_counter() - start_time
+    total_tokens = res.prompt_tokens + res.generated_tokens
+    tok_per_sec = res.generated_tokens / max(res.elapsed_time_sec, 1e-9) if res.generated_tokens > 0 else 0.0
+
+    active_profile = model_manager.active_profile_key or (
+        model_manager.model_info.profile_name if model_manager.model_info else "GroundUpGPT"
+    )
+
+    return AssistantResponse(
+        request_id=req_id,
+        mode=request.mode,
+        origin=ORIGIN_NEURAL,
+        answer_text=res.generated_text,
+        model_generated=True,
+        model_profile=active_profile,
+        tool_name=None,
+        fact_id=None,
+        provenance=None,
+        evaluated_expression=None,
+        stop_reason=getattr(res, "stop_reason", None) or "max_new_tokens",
+        prompt_tokens=res.prompt_tokens,
+        generated_tokens=res.generated_tokens,
+        total_tokens=total_tokens,
+        elapsed_time_sec=round(res.elapsed_time_sec, 4),
+        tokens_per_second=round(tok_per_sec, 2),
+        error_code=None,
+        details=None,
+    )
+
+
+@app.post("/api/assistant/stream", tags=["Assistant"])
+async def assistant_stream(
+    request: AssistantRequest,
+    raw_request: Request,
+) -> StreamingResponse:
+    """Stream assistant response using SSE, delivering tool results directly or streaming neural tokens."""
+    req_id = f"ast-{uuid.uuid4().hex[:10]}"
+    start_time = time.perf_counter()
+
+    # 1. Validate mode strictly
+    if request.mode not in (MODE_NATIVE, MODE_ASSISTED):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid mode '{request.mode}'. Must be strictly 'native' or 'assisted'.",
+        )
+
+    # 2. Run deterministic router classification
+    decision = assistant_router.classify_and_route(request.prompt, mode=request.mode)
+
+    # 3. If decision is terminal:
+    # ZERO model calls! No model lock acquired!
+    if decision.is_terminal:
+        async def tool_event_stream() -> AsyncIterator[str]:
+            elapsed = time.perf_counter() - start_time
+            tool_payload = json.dumps({
+                "request_id": req_id,
+                "mode": request.mode,
+                "origin": decision.origin,
+                "answer_text": decision.answer_text or "",
+                "model_generated": False,
+                "model_profile": None,
+                "tool_name": decision.tool_name,
+                "fact_id": decision.fact_id,
+                "provenance": decision.provenance,
+                "evaluated_expression": decision.evaluated_expression,
+                "stop_reason": "tool_complete",
+                "prompt_tokens": 0,
+                "generated_tokens": 0,
+                "total_tokens": 0,
+                "elapsed_time_sec": round(elapsed, 4),
+                "tokens_per_second": 0.0,
+                "error_code": decision.error_code,
+                "details": decision.details,
+            })
+            yield f"event: tool_result\ndata: {tool_payload}\n\n"
+
+            done_payload = json.dumps({
+                "request_id": req_id,
+                "mode": request.mode,
+                "origin": decision.origin,
+                "model_generated": False,
+                "prompt_tokens": 0,
+                "generated_tokens": 0,
+                "total_tokens": 0,
+                "active_context_tokens": 0,
+                "context_limit": 256,
+                "context_cropped": False,
+                "elapsed_time_sec": round(elapsed, 4),
+                "tokens_per_second": 0.0,
+                "stop_reason": "tool_complete",
+            })
+            yield f"event: done\ndata: {done_payload}\n\n"
+
+        return StreamingResponse(
+            tool_event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    # 4. Neural generation streaming path
+    if not model_manager.is_loaded or model_manager.generator is None or model_manager.model is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Model is not loaded. Run 'python scripts/generate_demo.py' or load a checkpoint profile.",
+        )
+
+    is_sft = bool(model_manager.model_info and getattr(model_manager.model_info, "is_sft", False))
+
+    if is_sft:
+        from src.generation import format_sft_prompt
+        prompt_to_run = format_sft_prompt(request.prompt)
+        stop_seqs = ["<|endoftext|>", "<|user|>", "<|assistant|>"]
+    else:
+        prompt_to_run = request.prompt
+        stop_seqs = None
+
+    try:
+        prompt_ids = model_manager.generator.tokenizer.encode(prompt_to_run)
+        prompt_tokens_count = len(prompt_ids)
+    except Exception as encode_err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to encode prompt: {encode_err}",
+        )
+
+    block_size = model_manager.model.config.block_size if model_manager.model else 256
+    if is_sft and prompt_tokens_count >= block_size:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Prompt length ({prompt_tokens_count} tokens) exceeds or equals maximum context of {block_size} tokens.",
+        )
+
+    config = GenerationConfig(
+        max_new_tokens=request.max_new_tokens,
+        temperature=request.temperature,
+        top_k=request.top_k,
+        top_p=request.top_p,
+        seed=request.seed,
+        stop_sequences=stop_seqs,
+        repetition_penalty=request.repetition_penalty,
+    )
+
+    active_profile = model_manager.active_profile_key or (
+        model_manager.model_info.profile_name if model_manager.model_info else "GroundUpGPT"
+    )
+
+    async def sse_event_stream() -> AsyncIterator[str]:
+        generated_tokens_count = 0
+        stream_stop_reason = "max_new_tokens"
+        stream_start_time = time.perf_counter()
+        sync_queue: queue.Queue = queue.Queue(maxsize=16)
+        cancel_event = threading.Event()
+        worker_done = threading.Event()
+
+        def inference_worker() -> None:
+            try:
+                assert model_manager.generator is not None
+                model_manager.inference_call_count += 1
+                for chunk in model_manager.generator.generate_stream(
+                    prompt=prompt_to_run, config=config
+                ):
+                    if cancel_event.is_set():
+                        break
+                    while not cancel_event.is_set():
+                        try:
+                            sync_queue.put(("token", chunk), timeout=0.05)
+                            break
+                        except queue.Full:
+                            continue
+
+                if not cancel_event.is_set():
+                    while not cancel_event.is_set():
+                        try:
+                            sync_queue.put(("done", None), timeout=0.05)
+                            break
+                        except queue.Full:
+                            continue
+            except Exception as exc:
+                try:
+                    sync_queue.put(("error", exc), timeout=0.1)
+                except queue.Full:
+                    pass
+            finally:
+                worker_done.set()
+
+        try:
+            async with model_manager.lock:
+                worker_thread = threading.Thread(
+                    target=inference_worker,
+                    name=f"ast-stream-{time.time_ns()}",
+                    daemon=True,
+                )
+                worker_thread.start()
+
+                try:
+                    while True:
+                        if await raw_request.is_disconnected():
+                            logger.info("Client disconnected during assistant stream. Halting generation.")
+                            cancel_event.set()
+                            break
+
+                        try:
+                            msg_type, payload = await asyncio.to_thread(
+                                sync_queue.get, True, 0.05
+                            )
+                        except queue.Empty:
+                            if worker_done.is_set() and sync_queue.empty():
+                                break
+                            continue
+
+                        if msg_type == "token":
+                            chunk = payload
+                            generated_tokens_count += 1
+                            if chunk.stop_reason:
+                                stream_stop_reason = chunk.stop_reason
+                            token_payload = json.dumps({
+                                "token_id": chunk.token_id,
+                                "text": chunk.text_chunk,
+                                "step": chunk.step,
+                                "generated_tokens": generated_tokens_count,
+                            })
+                            yield f"event: token\ndata: {token_payload}\n\n"
+                        elif msg_type == "done":
+                            break
+                        elif msg_type == "error":
+                            raise payload
+                finally:
+                    cancel_event.set()
+                    while not sync_queue.empty():
+                        try:
+                            sync_queue.get_nowait()
+                        except queue.Empty:
+                            break
+
+                    while worker_thread.is_alive():
+                        try:
+                            await asyncio.sleep(0.01)
+                        except asyncio.CancelledError:
+                            while worker_thread.is_alive():
+                                await asyncio.sleep(0.01)
+                            raise
+
+            model_manager.tokens_generated_count += generated_tokens_count
+
+            elapsed_time = time.perf_counter() - stream_start_time
+            total_tokens = prompt_tokens_count + generated_tokens_count
+            block_size_val = model_manager.model.config.block_size if model_manager.model else 256
+            active_context = min(total_tokens, block_size_val)
+            context_cropped = total_tokens > block_size_val
+            tokens_per_sec = (
+                generated_tokens_count / max(elapsed_time, 1e-9)
+                if generated_tokens_count > 0
+                else 0.0
+            )
+
+            done_payload = json.dumps({
+                "request_id": req_id,
+                "mode": request.mode,
+                "origin": ORIGIN_NEURAL,
+                "model_generated": True,
+                "model_profile": active_profile,
+                "prompt_tokens": prompt_tokens_count,
+                "generated_tokens": generated_tokens_count,
+                "total_tokens": total_tokens,
+                "active_context_tokens": active_context,
+                "context_limit": block_size_val,
+                "context_cropped": context_cropped,
+                "elapsed_time_sec": round(elapsed_time, 4),
+                "tokens_per_second": round(tokens_per_sec, 2),
+                "stop_reason": stream_stop_reason,
+            })
+            yield f"event: done\ndata: {done_payload}\n\n"
+
+        except Exception as exc:
+            logger.error(f"Assistant streaming error: {exc}", exc_info=True)
+            error_payload = json.dumps({"error": f"Assistant streaming error: {str(exc)}"})
+            yield f"event: error\ndata: {error_payload}\n\n"
+
+    return StreamingResponse(
+        sse_event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+

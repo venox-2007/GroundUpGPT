@@ -1,4 +1,4 @@
-import { MessageMetrics } from "../types";
+import { MessageMetrics, ToolResultEventPayload } from "../types";
 
 export interface TokenEventPayload {
   token_id: number;
@@ -16,6 +16,8 @@ export interface DoneEventPayload {
   context_cropped: boolean;
   elapsed_time_sec: number;
   tokens_per_second: number;
+  origin?: string;
+  model_generated?: boolean;
 }
 
 export interface ErrorEventPayload {
@@ -24,6 +26,7 @@ export interface ErrorEventPayload {
 
 export interface StreamCallbacks {
   onToken: (token: TokenEventPayload) => void;
+  onToolResult?: (result: ToolResultEventPayload) => void;
   onDone: (done: DoneEventPayload) => void;
   onError: (error: string) => void;
 }
@@ -105,6 +108,8 @@ function parseEventBlock(eventBlock: string, callbacks: StreamCallbacks): void {
     const parsed = JSON.parse(dataStr);
     if (eventType === "token") {
       callbacks.onToken(parsed as TokenEventPayload);
+    } else if (eventType === "tool_result") {
+      callbacks.onToolResult?.(parsed as ToolResultEventPayload);
     } else if (eventType === "done") {
       callbacks.onDone(parsed as DoneEventPayload);
     } else if (eventType === "error") {

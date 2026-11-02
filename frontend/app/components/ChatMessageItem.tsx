@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { ChatMessage } from "../types";
 
 interface ChatMessageItemProps {
@@ -17,6 +17,65 @@ export function ChatMessageItem({
   onRegenerate,
 }: ChatMessageItemProps) {
   const isUser = message.role === "user";
+  const [showFactDetails, setShowFactDetails] = useState(false);
+
+  // Determine origin display parameters
+  const origin = message.origin;
+  const isCalculator = origin === "safe_calculator";
+  const isLocalFact = origin === "local_fact";
+  const isToolError = origin === "tool_error";
+  const isNeural = !isUser && (origin === "neural" || (!isCalculator && !isLocalFact && !isToolError));
+
+  const getHeaderBadge = () => {
+    if (isUser) {
+      return {
+        initial: "U",
+        iconBg: "bg-slate-700 text-slate-200",
+        label: "You (Prompt)",
+        tag: null,
+      };
+    }
+    if (isCalculator) {
+      return {
+        initial: "C",
+        iconBg: "bg-sky-600 text-white",
+        label: "SafeCalculator — Computed",
+        tag: "Computed Math",
+        tagBg: "border-sky-800 bg-sky-950/60 text-sky-300",
+      };
+    }
+    if (isLocalFact) {
+      return {
+        initial: "F",
+        iconBg: "bg-emerald-600 text-white",
+        label: "Local Fact — Curated Record",
+        tag: "Curated Fact",
+        tagBg: "border-emerald-800 bg-emerald-950/60 text-emerald-300",
+      };
+    }
+    if (isToolError) {
+      return {
+        initial: "!",
+        iconBg: "bg-rose-600 text-white",
+        label: "SafeCalculator — Error",
+        tag: "Tool Error",
+        tagBg: "border-rose-800 bg-rose-950/60 text-rose-300",
+      };
+    }
+    // Neural default
+    const profileText = message.modelProfile
+      ? `GroundUpGPT (${message.modelProfile})`
+      : "GroundUpGPT";
+    return {
+      initial: "G",
+      iconBg: "bg-teal-600 text-white",
+      label: `${profileText} — Neural`,
+      tag: "Neural",
+      tagBg: "border-slate-700 bg-slate-800/60 text-slate-300",
+    };
+  };
+
+  const badge = getHeaderBadge();
 
   return (
     <div
@@ -24,22 +83,21 @@ export function ChatMessageItem({
         isUser ? "items-end" : "items-start"
       }`}
     >
-      {/* Role Identifier Header */}
+      {/* Role and Truthful Origin Header */}
       <div className="flex items-center gap-2 px-1 text-[11px] font-medium text-slate-400">
         <span
-          className={`flex h-4 w-4 items-center justify-center rounded text-[10px] font-bold ${
-            isUser ? "bg-slate-700 text-slate-200" : "bg-teal-600 text-white"
-          }`}
+          className={`flex h-4 w-4 items-center justify-center rounded text-[10px] font-bold ${badge.iconBg}`}
         >
-          {isUser ? "U" : "G"}
+          {badge.initial}
         </span>
-        <span>
-          {isUser
-            ? "You (Prompt)"
-            : message.modelProfile
-            ? `GroundUpGPT (${message.modelProfile})`
-            : "GroundUpGPT (Completion)"}
-        </span>
+        <span className="font-semibold text-slate-300">{badge.label}</span>
+        {badge.tag && (
+          <span
+            className={`rounded px-1.5 py-0.2 text-[9px] font-mono border ${badge.tagBg}`}
+          >
+            {badge.tag}
+          </span>
+        )}
       </div>
 
       {/* Message Content Bubble */}
@@ -47,15 +105,80 @@ export function ChatMessageItem({
         className={`max-w-[85%] rounded-lg px-4 py-3 text-sm leading-relaxed sm:max-w-[75%] ${
           isUser
             ? "border border-slate-700 bg-slate-800 text-slate-100"
+            : isToolError
+            ? "border border-rose-900/60 bg-slate-900/90 text-rose-200"
             : "border border-slate-800 bg-slate-900/90 text-slate-200"
         }`}
       >
+        {/* SafeCalculator expression breakdown */}
+        {!isUser && isCalculator && message.evaluatedExpression && (
+          <div className="mb-2.5 flex items-center gap-2 rounded border border-sky-900/60 bg-sky-950/30 px-2.5 py-1 text-xs font-mono text-sky-400">
+            <span className="text-slate-400">Expression:</span>
+            <span className="font-semibold text-sky-200">
+              {message.evaluatedExpression}
+            </span>
+            <span className="text-slate-400">=</span>
+            <span className="font-bold text-sky-100">{message.content}</span>
+          </div>
+        )}
+
         <div className="whitespace-pre-wrap font-sans">
           {message.content}
           {message.isStreaming && (
             <span className="inline-block animate-pulse text-teal-400">▍</span>
           )}
         </div>
+
+        {/* Local Fact Expandable Details */}
+        {!isUser && isLocalFact && (
+          <div className="mt-2.5 border-t border-slate-800/80 pt-2 text-xs">
+            <button
+              type="button"
+              onClick={() => setShowFactDetails(!showFactDetails)}
+              className="flex items-center gap-1 text-[11px] font-mono text-emerald-400 hover:text-emerald-300 transition"
+            >
+              <span>{showFactDetails ? "▴ Hide Fact Details" : "▾ Curated Fact Details"}</span>
+              {message.factId && (
+                <span className="text-slate-500 font-mono">({message.factId})</span>
+              )}
+            </button>
+            {showFactDetails && (
+              <div className="mt-2 space-y-1.5 rounded border border-slate-800 bg-slate-950/70 p-2.5 font-mono text-[11px] text-slate-300">
+                {message.factId && (
+                  <div className="flex gap-2">
+                    <span className="text-slate-500 w-24">Fact ID:</span>
+                    <span className="text-emerald-300 font-semibold">{message.factId}</span>
+                  </div>
+                )}
+                {message.details?.entity && (
+                  <div className="flex gap-2">
+                    <span className="text-slate-500 w-24">Subject:</span>
+                    <span className="text-slate-200">{message.details.entity}</span>
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <span className="text-slate-500 w-24">Provenance:</span>
+                  <span className="text-slate-300">
+                    {message.provenance || "curated_groundup_facts_v1"}
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <span className="text-slate-500 w-24">Version:</span>
+                  <span className="text-slate-300">{message.details?.version || "1.0"}</span>
+                </div>
+                <div className="flex gap-2">
+                  <span className="text-slate-500 w-24">Model gen:</span>
+                  <span className="text-amber-400 font-semibold">false (Deterministic Local)</span>
+                </div>
+                {message.details?.supporting_passage && (
+                  <div className="mt-1.5 pt-1.5 border-t border-slate-800/80 text-[11px] font-sans text-slate-400 italic">
+                    "{message.details.supporting_passage}"
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Error message card */}
         {message.error && (
@@ -68,7 +191,7 @@ export function ChatMessageItem({
         {/* Real Backend Telemetry Metrics */}
         {!isUser && message.metrics && (
           <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-800/80 pt-2 font-mono text-[11px] text-slate-400">
-            {message.metrics.generatedTokens !== undefined && (
+            {isNeural && message.metrics.generatedTokens !== undefined && (
               <span>
                 Tokens:{" "}
                 <span className="text-slate-200 font-semibold">
@@ -76,7 +199,7 @@ export function ChatMessageItem({
                 </span>
               </span>
             )}
-            {message.metrics.tokensPerSecond !== undefined && (
+            {isNeural && message.metrics.tokensPerSecond !== undefined && (
               <span>
                 Speed:{" "}
                 <span className="text-teal-400 font-semibold">
@@ -92,7 +215,16 @@ export function ChatMessageItem({
                 </span>
               </span>
             )}
-            {message.metrics.activeContextTokens !== undefined &&
+            {!isNeural && (
+              <span className="text-slate-400">
+                Origin:{" "}
+                <span className="text-slate-200 font-semibold">
+                  {message.toolName || origin || "Tool"} (0 model calls)
+                </span>
+              </span>
+            )}
+            {isNeural &&
+              message.metrics.activeContextTokens !== undefined &&
               message.metrics.contextLimit !== undefined && (
                 <span className="flex items-center gap-1">
                   Context:{" "}
@@ -111,8 +243,8 @@ export function ChatMessageItem({
         )}
       </div>
 
-      {/* Regenerate Action Button */}
-      {!isUser && isLastAssistant && !isGenerating && onRegenerate && (
+      {/* Regenerate Action Button (for neural generations) */}
+      {!isUser && isLastAssistant && !isGenerating && onRegenerate && isNeural && (
         <button
           type="button"
           onClick={onRegenerate}

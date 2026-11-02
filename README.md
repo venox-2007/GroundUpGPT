@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-CUDA%20Accelerated-EE4C2C.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Status: Completed (Steps 1-42)](https://img.shields.io/badge/Status-Completed%20(Steps%201--42)-brightgreen.svg)]()
+[![Status: Completed (Steps 1-43)](https://img.shields.io/badge/Status-Completed%20(Steps%201--43)-brightgreen.svg)]()
 
 GroundUpGPT is an educational and engineering project dedicated to designing, implementing, training, evaluating, and deploying a small autoregressive, decoder-only Transformer language model completely from scratch using Python and PyTorch.
 
@@ -1588,6 +1588,108 @@ Tested 8 adversarial context attack vectors (instruction hijacking, system promp
 
 ---
 
+## Step 43: Opt-In Tool-Assisted Chat: Safe Calculator, Local Facts, and Transparent Answer Origins
+
+In **Step 43**, we integrated the deterministic tools developed in Step 42 into the existing FastAPI backend and Next.js browser chat application. The system provides two clearly distinguished modes, preserving the integrity of the scratch-trained Transformer while making arithmetic and curated factual answers available deterministically:
+
+```mermaid
+flowchart TD
+    User["User Prompt"] --> ModeSwitch{"Chat Mode Selector"}
+    ModeSwitch -->|"native (Default)"| NeuralPath["GroundUpGPT-27M Neural Generation"]
+    ModeSwitch -->|"assisted (Opt-In)"| Router["Assistant Router (Deterministic Server Logic)"]
+
+    Router -->|"Arithmetic Query"| Calc["SafeCalculator (Restricted AST)"]
+    Router -->|"Curated Fact Query"| Fact["LocalFactRetriever (Curated Inventory)"]
+    Router -->|"Conversational / Creative"| NeuralPath
+
+    Calc -->|"Valid Result"| ToolResult["origin: safe_calculator (0 model calls)"]
+    Calc -->|"Division by Zero / Syntax Error"| ToolError["origin: tool_error (0 model calls)"]
+    Fact -->|"Validated Match"| FactResult["origin: local_fact (0 model calls)"]
+    Fact -->|"Unsupported / Relation Mismatch"| FactLimitation["origin: local_fact (unsupported_fact)"]
+    NeuralPath --> NeuralResult["origin: neural (Autoregressive Tokens)"]
+
+    ToolResult --> UI["Next.js Web Chat UI (Truthful Origin Badges)"]
+    ToolError --> UI
+    FactResult --> UI
+    FactLimitation --> UI
+    NeuralResult --> UI
+```
+
+### 1. Two Distinct Operating Modes
+
+1. **Native GPT Chat (Default)**:
+   - All responses are produced autoregressively by the loaded GroundUpGPT checkpoint (`27m_anchors_best`, `27m_sft_best`, `5m_sft_best`, etc.).
+   - Never secretly consults or executes tools.
+   - Retains full real-time token streaming and generation telemetry.
+2. **Tool-Assisted Chat (Experimental, Opt-In)**:
+   - Server-side deterministic router evaluates incoming requests.
+   - Directs recognized arithmetic to `SafeCalculator` and verified factual lookups to `LocalFactRetriever`.
+   - Never asks the 27M language model to route or select tools.
+   - Never passes deterministic tool results through the neural model for rewriting (preventing corruption/hallucination).
+   - Falls back cleanly to neural generation for creative, conversational, and open-ended requests.
+
+### 2. Dedicated Assistant Routing Layer (`backend/assistant_router.py`)
+
+A server-side deterministic classification and routing module:
+- **Accepted Execution Origins**: Exactly four normalized string identifiers:
+  - `neural`: Pure autoregressive model generation.
+  - `safe_calculator`: Deterministic decimal arithmetic evaluation.
+  - `local_fact`: Curated local record lookup with domain-aware entity and relation validation.
+  - `tool_error`: Safe reporting of arithmetic errors (division by zero, syntax errors) or inventory limitations.
+- **Strict Mode Validation**: Missing or invalid modes are strictly rejected with HTTP 400/422. Model switching never resets chat mode; mode switching never changes the loaded checkpoint.
+
+### 3. SafeCalculator Integration & Protection
+
+- Uses AST-restricted `Decimal` evaluation (`src/safe_calculator.py`).
+- Supports natural-language prefixes (`"What is 7 + 9?"`, `"Calculate (12 + 4) * 3"`, `"64 / 8"`, `"15 minus 7"`).
+- **Strict Constraints**: Max length 120 chars, max operations 25, max magnitude $10^{15}$. Disallows `eval()`, `exec()`, shell execution, arbitrary variables, and dynamic imports.
+- **Explicit Error Reporting**: Queries like `"What is 10 / 0?"` return `origin: tool_error` with `error_code: division_by_zero`. Invalid arithmetic is never silently forwarded to the neural model to invent an answer.
+
+### 4. Local Fact Retrieval & Domain-Aware Validation
+
+- **Exclusion of Synthetic Facts**: Fictional test records (`syn_xylo7_mineral`, `syn_quellix_capital`, `syn_boranic_finch`, `syn_zorblax_fleet`) are strictly excluded from user-facing fact assistance. Asking `"What is the capital of Eldoria?"` returns an inventory limitation, never exposing fictional test entities as real-world knowledge.
+- **Domain-Aware Entity & Relation Validation**:
+  - Validates that the requested entity matches the fact record.
+  - Validates that the requested relation matches the stored relation. For example, `"What is the population of Japan?"` recognizes a relation mismatch (population $\ne$ capital) and returns an inventory limitation rather than falsely outputting Tokyo.
+  - Rejects ambiguous multi-country questions (e.g. `"What is the capital of France and Germany?"`).
+  - Unsupported capitals (e.g. Norway, Jupiter) return clear inventory limitation messages (`origin: local_fact`, `fact_id: null`, `error_code: unsupported_fact`).
+
+### 5. Zero Neural Model Calls Guarantee
+
+The backend is instrumented with telemetry counters (`inference_call_count`, `forward_pass_count`, `tokens_generated_count`):
+- For a successful `SafeCalculator` request: **0 inference calls**, **0 forward passes**, **0 GPU tokens**.
+- For a direct `LocalFactRetriever` lookup: **0 inference calls**, **0 forward passes**, **0 GPU tokens**.
+- For neural generation requests: Telemetry accurately increments based on actual token generation.
+
+### 6. Streaming SSE Protocol & Truthful UI
+
+- **Endpoints**:
+  - `POST /api/assistant/respond`: Non-streaming assistant endpoint returning `AssistantResponse`.
+  - `POST /api/assistant/stream`: Server-Sent Events endpoint emitting `token`, `tool_result`, `done`, and `error` events.
+  - Preserves all legacy endpoints (`/api/generate`, `/api/generate/stream`, `/api/model/info`, `/api/model/profiles`, `/api/model/load`).
+- **Truthful UI Origin Badges**:
+  - `GroundUpGPT-27M — Neural` (Slate badge with live tok/s and context telemetry).
+  - `SafeCalculator — Computed` (Sky blue badge with expression breakdown and `0 model calls`).
+  - `Local Fact — Curated Record` (Emerald badge with expandable details: Fact ID, Subject, Stored Provenance, Inventory Version, and Supporting Passage).
+  - `SafeCalculator — Error` (Rose badge with explicit error description).
+
+### 7. End-to-End Smoke Test Scenarios A through J
+
+| Scenario | Mode | Prompt | Expected Result | Origin | Model Generated |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **A** | `native` | "What is 7 + 9?" | Neural generation from active checkpoint | `neural` | `true` |
+| **B** | `assisted` | "What is 7 + 9?" | Exact computation: "16" | `safe_calculator` | `false` (0 calls) |
+| **C** | `assisted` | "What is the capital of Japan?" | Curated answer: "Tokyo" | `local_fact` | `false` (0 calls) |
+| **D** | `assisted` | "What is the capital of an unsupported country?" | Inventory limitation message | `local_fact` | `false` (0 calls) |
+| **E** | `assisted` | "Hello!" | Neural conversational response | `neural` | `true` |
+| **F** | `assisted` | "Tell me a short story." | Neural streamed creative response | `neural` | `true` |
+| **G** | `assisted` | "What is 10 / 0?" | Explicit error: Division by zero is undefined | `tool_error` | `false` (0 calls) |
+| **H** | `assisted` | "What is the capital of Eldoria?" | Inventory limitation (synthetic fact excluded) | `local_fact` | `false` (0 calls) |
+| **I** | `assisted` | "What is the population of Japan?" | Relation mismatch limitation (does NOT return Tokyo) | `local_fact` | `false` (0 calls) |
+| **J** | Switch | `27m_sft_best` $\leftrightarrow$ `27m_anchors_best` | Tool results invariant; model switches cleanly | Invariant | Verified |
+
+---
+
 ## Current Implementation Status
 
 - **Completed Steps**:
@@ -1633,4 +1735,5 @@ Tested 8 adversarial context attack vectors (instruction hijacking, system promp
   - **Step 40 — Targeted Conversational Fine-Tuning with Verified Short-Answer Anchors**: Reconciled Step 39 reporting discrepancies, engineered a verified 430-example conversational anchor dataset across 11 categories (data/cache_sft_anchors_v1/, 321 train, 53 val, 56 held-out transfer test) with 0 collisions against protected benchmarks and disjoint arithmetic/concept splits. Implemented BlendedSFTDataPipeline delivering 54.8% anchor samples and 28.4% anchor active target tokens. Executed bounded 250-step SFT run (2.77 min on RTX 3050 Laptop GPU): Anchor validation loss dropped from 1.9411 to **1.4802** (-37.0% perplexity), transfer test loss dropped from 1.8503 to **1.4331** (-34.1% perplexity), while Dolly validation loss (+0.33% drift) and pretraining LM loss (+0.90% drift) remained preserved without catastrophic forgetting. Saved checkpoints in checkpoints/27m_sft_anchors_v1/ (model_27m_anchors_best.pt, model_27m_anchors_latest.pt). Conducted 111-prompt comparative benchmark across Frozen 35, Transfer Test, and Seen Train under greedy and calibrated decoding: demonstrated dramatic response length reduction (median 52 -> 23–25 tokens), clean delimiter termination, high accuracy on classification/definitions, structural equation syntax, and documented arithmetic computation capacity limits. Verified with 8/8 unit tests (	ests/test_27m_anchor_sft.py) and full repository test suite (247/247 passing).
   - **Step 41 — Reliable Conversational Evaluation and Experimental 27M Model Integration**: Built deterministic task-specific conversation evaluation engine (`src/conversation_evaluation.py`) with strict rubrics for arithmetic, factual QA, scientific definitions, classification, and list counting. Re-scored all 111 Step 40 benchmark generations, eliminating regex false positives and establishing honest baselines (Frozen 35: 0/23, Transfer Test: 1/26, Seen Train: 2/14). Fixed backend metadata schema compatibility for anchor checkpoints (`prev_sft_step: 600`, `anchor_sft_step: 250`, `pretrain_steps: 5949`), registered `27m_anchors_best` and `27m_anchors_latest` experimental chat profiles, updated Next.js sidebar and message attribution, verified Windows launcher preflight, and validated end-to-end functionality with 13 new unit/integration tests (`tests/test_conversation_evaluation.py`, `tests/test_27m_anchor_ui_integration.py`). Verified with full repository test suite (260/260 passing) and Next.js production build (`npm run build`).
   - **Step 42 — Grounded QA Feasibility & Deterministic Local Tools**: Evaluated GroundUpGPT-27M under explicit prompt conditioning across 60 controlled cases in 7 groups. Established empirical grounding boundaries: concise context (Tier 1 ~15 tokens) lifted accuracy on familiar and unfamiliar facts from 0–20% up to 50–70%, but multi-fact distractor contexts (Tier 2 ~50 tokens) collapsed to 0.0% due to attention dispersion. Audited generation termination telemetry with explicit `stop_reason` tracking (`end_of_turn`, `user_delimiter`, `assistant_delimiter`, `max_new_tokens`, `other`) and verified `<|endoftext|>` delimiter usage. Implemented safe AST-based arithmetic calculator (`src/safe_calculator.py`) achieving 32/32 (100.0%) accuracy and lightweight BM25 fact retrieval engine (`src/local_fact_retrieval.py`) achieving 16/16 (100.0%) retrieval accuracy. Demonstrated resilience against 8 adversarial injection attack vectors. Added 23 unit tests across 4 test suites.
-- **Roadmap Complete**: Phase 14 completed through Step 42! All 42 steps complete.
+  - **Step 43 — Opt-In Tool-Assisted Chat & Transparent Answer Origins**: Integrated deterministic tools into FastAPI and Next.js chat application with two clearly distinguished modes: Native GPT (default, pure neural autoregression) and Tool-Assisted (opt-in, deterministic routing). Built `backend/assistant_router.py` enforcing server-side classification across exact origin values (`neural`, `safe_calculator`, `local_fact`, `tool_error`). Routed valid arithmetic queries to `SafeCalculator` and validated factual questions to `LocalFactRetriever` with domain-aware entity/relation validation (excluding synthetic records and rejecting cross-entity mismatches like population of Japan returning Tokyo). Enforced zero neural model calls, zero forward passes, and zero GPU tokens for deterministic results. Added dedicated `/api/assistant/respond` and `/api/assistant/stream` SSE endpoints with structured payloads. Updated Next.js UI with compact mode toggle, sub-header mode description, and truthful origin badges (`SafeCalculator — Computed`, `Local Fact — Curated Record` with expandable provenance details, `SafeCalculator — Error`, `GroundUpGPT-27M — Neural`). Verified all smoke scenarios A through J with 30 new tests across 3 test suites (`tests/test_assistant_router.py`, `tests/test_assistant_api.py`, `tests/test_tool_assisted_mode.py`). Verified full test suite pass (313/313 passing), launcher preflight, and Next.js production build.
+- **Roadmap Complete**: Phase 15 completed through Step 43! All 43 steps complete.

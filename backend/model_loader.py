@@ -38,6 +38,23 @@ class ModelManager:
         self.device_name: str = "cpu"
         self.lock: asyncio.Lock = asyncio.Lock()
         self._is_loaded: bool = False
+        self.inference_call_count: int = 0
+        self.forward_pass_count: int = 0
+        self.tokens_generated_count: int = 0
+
+    def reset_telemetry_counters(self) -> None:
+        """Reset inference call and token telemetry counters to zero for testing."""
+        self.inference_call_count = 0
+        self.forward_pass_count = 0
+        self.tokens_generated_count = 0
+
+    def get_telemetry_counters(self) -> Dict[str, int]:
+        """Return current inference telemetry counters."""
+        return {
+            "inference_call_count": self.inference_call_count,
+            "forward_pass_count": self.forward_pass_count,
+            "tokens_generated_count": self.tokens_generated_count,
+        }
 
     @property
     def is_loaded(self) -> bool:
@@ -142,6 +159,12 @@ class ModelManager:
 
         # 6. Initialize TextGenerator Engine
         generator = TextGenerator(model, tokenizer, device=target_device)
+
+        # Register forward hook for verifying neural execution in tests
+        def _on_forward_pass(module: Any, args: Any, output: Any) -> None:
+            self.forward_pass_count += 1
+
+        model.register_forward_hook(_on_forward_pass)
 
         # 7. Construct Metadata Summary
         is_anchor_sft = checkpoint.get("anchor_sft_step") is not None

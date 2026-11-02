@@ -19,6 +19,36 @@ export interface ChatMessage {
   metrics?: MessageMetrics;
   error?: string;
   modelProfile?: string;
+  mode?: "native" | "assisted";
+  origin?: "neural" | "safe_calculator" | "local_fact" | "tool_error" | string;
+  toolName?: string;
+  factId?: string;
+  provenance?: string;
+  evaluatedExpression?: string;
+  errorCode?: string;
+  modelGenerated?: boolean;
+  details?: Record<string, any>;
+}
+
+export interface ToolResultEventPayload {
+  request_id: string;
+  mode: "native" | "assisted";
+  origin: "neural" | "safe_calculator" | "local_fact" | "tool_error" | string;
+  answer_text: string;
+  model_generated: boolean;
+  model_profile?: string | null;
+  tool_name?: string | null;
+  fact_id?: string | null;
+  provenance?: string | null;
+  evaluated_expression?: string | null;
+  stop_reason?: string | null;
+  prompt_tokens?: number | null;
+  generated_tokens?: number | null;
+  total_tokens?: number | null;
+  elapsed_time_sec: number;
+  tokens_per_second?: number | null;
+  error_code?: string | null;
+  details?: Record<string, any> | null;
 }
 
 export interface ModelInfo {
