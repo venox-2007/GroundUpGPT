@@ -107,15 +107,15 @@ def test_prompt_loss_masking_and_target_alignment(tokenizer: BPETokenizer) -> No
     ex = encode_conversation(turns, tokenizer, max_seq_len=256)
     assert ex is not None
 
-    # Prompt portion should be ignored in targets
-    prompt_len = ex.prompt_tokens_count
-    for idx in range(prompt_len):
+    # Prompt targets prior to first response target should be ignored (-100)
+    first_target_idx = ex.first_target_index
+    for idx in range(first_target_idx):
         assert ex.target_ids[idx] == IGNORE_INDEX
         assert ex.loss_mask[idx] == 0
 
-    # Response portion should be active
+    # Response targets starting from first_target_idx should be active
     resp_len = ex.response_tokens_count
-    for idx in range(prompt_len, prompt_len + resp_len):
+    for idx in range(first_target_idx, first_target_idx + resp_len):
         assert ex.target_ids[idx] != IGNORE_INDEX
         assert ex.loss_mask[idx] == 1
 

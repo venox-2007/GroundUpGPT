@@ -159,6 +159,21 @@ class TokenizedExample:
                 f"loss_mask shape {list(self.loss_mask.shape)} != target_ids shape {list(self.target_ids.shape)}"
             )
 
+    @property
+    def first_target_index(self) -> int:
+        """0-based index of the first active assistant target token in target_ids (P - 1)."""
+        return self.prompt_tokens_count - 1
+
+    @property
+    def prompt_targets_count(self) -> int:
+        """Number of masked prompt targets (P - 1) before the first active response target."""
+        return self.prompt_tokens_count - 1
+
+    @property
+    def prompt_input_ids(self) -> torch.Tensor:
+        """The full prompt portion of input_ids (P tokens, including the final assistant header token)."""
+        return self.input_ids[: self.prompt_tokens_count]
+
 
 def format_conversation(
     turns: Sequence[ConversationTurn],
@@ -302,7 +317,10 @@ def encode_conversation(
     if active_response_count == 0:
         return None
 
-    prompt_tokens_count = len(input_ids_list) - active_response_count
+    # Prompt tokens count (P) spans all tokens prior to the assistant response in tokens (len(tokens) - R).
+    # Note: len(input_ids_list) is P + R - 1, so len(input_ids_list) - active_response_count equals P - 1
+    # (the index of the first active target, first_target_index), NOT the prompt token count.
+    prompt_tokens_count = len(tokens) - active_response_count
 
     return TokenizedExample(
         example_id=example_id,
@@ -820,6 +838,16 @@ class SFTDataPipeline:
 
         max_seq_len = meta.get("max_seq_len", 256)
 
+        def _normalize_prompt_count(d: Dict[str, Any]) -> int:
+            p_count = d.get("prompt_tokens_count", 0)
+            r_count = d.get("response_tokens_count", 0)
+            inp_len = d["input_ids"].size(0)
+            tot_len = d.get("total_tokens_count", inp_len + 1)
+            # Legacy cache stored p_count = inp_len - r_count = P - 1
+            if p_count + r_count == inp_len and p_count + r_count < tot_len:
+                return p_count + 1
+            return p_count
+
         train_raw = torch.load(train_file, weights_only=True)
         train_examples = [
             TokenizedExample(
@@ -827,7 +855,7 @@ class SFTDataPipeline:
                 input_ids=d["input_ids"],
                 target_ids=d["target_ids"],
                 loss_mask=d["loss_mask"],
-                prompt_tokens_count=d["prompt_tokens_count"],
+                prompt_tokens_count=_normalize_prompt_count(d),
                 response_tokens_count=d["response_tokens_count"],
                 total_tokens_count=d["total_tokens_count"],
                 category=d.get("category"),
@@ -843,7 +871,7 @@ class SFTDataPipeline:
                 input_ids=d["input_ids"],
                 target_ids=d["target_ids"],
                 loss_mask=d["loss_mask"],
-                prompt_tokens_count=d["prompt_tokens_count"],
+                prompt_tokens_count=_normalize_prompt_count(d),
                 response_tokens_count=d["response_tokens_count"],
                 total_tokens_count=d["total_tokens_count"],
                 category=d.get("category"),
