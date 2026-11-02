@@ -43,6 +43,7 @@ from backend.schemas import (
     HealthResponse,
     LoadModelRequest,
     ModelInfoResponse,
+    KnowledgeSessionResponse,
     KnowledgeSourceCreateRequest,
     KnowledgeSourceResponse,
     KnowledgeRetrieveRequest,
@@ -54,6 +55,7 @@ from backend.schemas import (
     ConversationSummarySchema,
     ConversationDetailSchema,
 )
+from datetime import datetime, timezone
 from src.chat_history import ChatHistoryManager
 from src.generation import GenerationConfig
 from src.user_knowledge import knowledge_store
@@ -538,9 +540,36 @@ async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
             detail=f"Invalid mode '{request.mode}'. Must be strictly 'native' or 'assisted'.",
         )
 
-    # 2. Knowledge Evidence Mode (0 model calls)
-    if request.knowledge_mode == "evidence":
-        session = knowledge_store.get_or_create_session(request.knowledge_session_id or "default")
+    # 2. Strict Native GPT Mode Isolation
+    # Under Native GPT mode, knowledge retrieval, safe calculator, and curated facts are strictly inactive.
+    # Forged requests with mode='native' and knowledge_mode!='off' are neutralized to pure neural generation.
+    effective_knowledge_mode = "off" if request.mode == MODE_NATIVE else request.knowledge_mode
+    effective_knowledge_session_id = None if request.mode == MODE_NATIVE else request.knowledge_session_id
+
+    # 3. Knowledge Evidence Mode (0 model calls) - Only available in Tool-Assisted mode!
+    if effective_knowledge_mode == "evidence":
+        session = knowledge_store.get_session(effective_knowledge_session_id) if effective_knowledge_session_id else None
+        if not session:
+            return _finish(AssistantResponse(
+                request_id=req_id,
+                mode=request.mode,
+                origin=ORIGIN_DOCUMENT_EXCERPT,
+                answer_text="No active knowledge session found. Please initialize an active knowledge session to retrieve evidence.",
+                model_generated=False,
+                model_profile=None,
+                tool_name="UserKnowledgeRetriever",
+                fact_id=None,
+                provenance=None,
+                evaluated_expression=None,
+                stop_reason="tool_complete",
+                prompt_tokens=0,
+                generated_tokens=0,
+                total_tokens=0,
+                elapsed_time_sec=0.0,
+                tokens_per_second=0.0,
+                error_code="session_not_found",
+                details={"error": "Session not found"},
+            ))
         retriever = UserKnowledgeRetriever.from_session(session)
         k_res = retriever.retrieve(request.prompt)
         elapsed = time.perf_counter() - start_time
@@ -588,12 +617,12 @@ async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
             },
         ))
 
-    # 3. Run deterministic router classification (unless grounded knowledge is active and terminal router is not arithmetic)
+    # 4. Run deterministic router classification (unless grounded knowledge is active and terminal router is not arithmetic)
     decision = assistant_router.classify_and_route(request.prompt, mode=request.mode)
 
     # If decision is terminal (safe_calculator, local_fact, or tool_error):
     # ZERO model calls! No model lock acquired!
-    if decision.is_terminal and request.knowledge_mode != "grounded":
+    if decision.is_terminal and effective_knowledge_mode != "grounded":
         elapsed = time.perf_counter() - start_time
         return _finish(AssistantResponse(
             request_id=req_id,
@@ -642,8 +671,30 @@ async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
 
     grounded_chunk = None
     retrieval_details = None
-    if request.knowledge_mode == "grounded":
-        session = knowledge_store.get_or_create_session(request.knowledge_session_id or "default")
+    if effective_knowledge_mode == "grounded":
+        session = knowledge_store.get_session(effective_knowledge_session_id) if effective_knowledge_session_id else None
+        if not session:
+            elapsed = time.perf_counter() - start_time
+            return _finish(AssistantResponse(
+                request_id=req_id,
+                mode=request.mode,
+                origin=ORIGIN_GROUNDED_NEURAL,
+                answer_text="No active knowledge session found. Please initialize an active knowledge session to use grounded mode.",
+                model_generated=False,
+                model_profile=None,
+                tool_name="UserKnowledgeRetriever",
+                fact_id=None,
+                provenance=None,
+                evaluated_expression=None,
+                stop_reason="tool_complete",
+                prompt_tokens=0,
+                generated_tokens=0,
+                total_tokens=0,
+                elapsed_time_sec=round(elapsed, 4),
+                tokens_per_second=0.0,
+                error_code="session_not_found",
+                details={"error": "Session not found"},
+            ))
         retriever = UserKnowledgeRetriever.from_session(session)
         k_res = retriever.retrieve(request.prompt)
         if k_res.status == "conflicting_evidence":
@@ -855,9 +906,65 @@ async def assistant_stream(
             detail=f"Invalid mode '{request.mode}'. Must be strictly 'native' or 'assisted'.",
         )
 
-    # 2. Knowledge Evidence Mode (0 model calls)
-    if request.knowledge_mode == "evidence":
-        session = knowledge_store.get_or_create_session(request.knowledge_session_id or "default")
+    # 2. Strict Native GPT Mode Isolation
+    # Under Native GPT mode, knowledge retrieval, safe calculator, and curated facts are strictly inactive.
+    # Forged requests with mode='native' and knowledge_mode!='off' are neutralized to pure neural generation.
+    effective_knowledge_mode = "off" if request.mode == MODE_NATIVE else request.knowledge_mode
+    effective_knowledge_session_id = None if request.mode == MODE_NATIVE else request.knowledge_session_id
+
+    # 3. Knowledge Evidence Mode (0 model calls) - Only available in Tool-Assisted mode!
+    if effective_knowledge_mode == "evidence":
+        session = knowledge_store.get_session(effective_knowledge_session_id) if effective_knowledge_session_id else None
+        if not session:
+            async def session_not_found_stream() -> AsyncIterator[str]:
+                ans_text = "No active knowledge session found. Please initialize an active knowledge session to retrieve evidence."
+                payload = json.dumps({
+                    "request_id": req_id,
+                    "mode": request.mode,
+                    "origin": ORIGIN_DOCUMENT_EXCERPT,
+                    "answer_text": ans_text,
+                    "model_generated": False,
+                    "model_profile": None,
+                    "tool_name": "UserKnowledgeRetriever",
+                    "fact_id": None,
+                    "provenance": None,
+                    "evaluated_expression": None,
+                    "stop_reason": "tool_complete",
+                    "prompt_tokens": 0,
+                    "generated_tokens": 0,
+                    "total_tokens": 0,
+                    "elapsed_time_sec": 0.0,
+                    "tokens_per_second": 0.0,
+                    "error_code": "session_not_found",
+                    "details": {"error": "Session not found"},
+                })
+                yield f"event: tool_result\ndata: {payload}\n\n"
+                done_payload = json.dumps({
+                    "request_id": req_id,
+                    "mode": request.mode,
+                    "origin": ORIGIN_DOCUMENT_EXCERPT,
+                    "model_generated": False,
+                    "prompt_tokens": 0,
+                    "generated_tokens": 0,
+                    "total_tokens": 0,
+                    "active_context_tokens": 0,
+                    "context_limit": 256,
+                    "context_cropped": False,
+                    "elapsed_time_sec": 0.0,
+                    "tokens_per_second": 0.0,
+                    "stop_reason": "tool_complete",
+                })
+                yield f"event: done\ndata: {done_payload}\n\n"
+
+            return StreamingResponse(
+                session_not_found_stream(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
         retriever = UserKnowledgeRetriever.from_session(session)
         k_res = retriever.retrieve(request.prompt)
         elapsed = time.perf_counter() - start_time
@@ -949,12 +1056,12 @@ async def assistant_stream(
             },
         )
 
-    # 3. Run deterministic router classification
+    # 4. Run deterministic router classification
     decision = assistant_router.classify_and_route(request.prompt, mode=request.mode)
 
     # If decision is terminal:
     # ZERO model calls! No model lock acquired!
-    if decision.is_terminal and (request.knowledge_mode != "grounded" or decision.origin == ORIGIN_SAFE_CALCULATOR):
+    if decision.is_terminal and (effective_knowledge_mode != "grounded" or decision.origin == ORIGIN_SAFE_CALCULATOR):
         async def tool_event_stream() -> AsyncIterator[str]:
             if request.conversation_id:
                 try:
@@ -1021,8 +1128,58 @@ async def assistant_stream(
     # Check grounded guardrail before starting worker thread
     grounded_chunk = None
     retrieval_details = None
-    if request.knowledge_mode == "grounded":
-        session = knowledge_store.get_or_create_session(request.knowledge_session_id or "default")
+    if effective_knowledge_mode == "grounded":
+        session = knowledge_store.get_session(effective_knowledge_session_id) if effective_knowledge_session_id else None
+        if not session:
+            async def session_not_found_stream() -> AsyncIterator[str]:
+                ans_text = "No active knowledge session found. Please initialize an active knowledge session to use grounded mode."
+                payload = json.dumps({
+                    "request_id": req_id,
+                    "mode": request.mode,
+                    "origin": ORIGIN_GROUNDED_NEURAL,
+                    "answer_text": ans_text,
+                    "model_generated": False,
+                    "model_profile": None,
+                    "tool_name": "UserKnowledgeRetriever",
+                    "fact_id": None,
+                    "provenance": None,
+                    "evaluated_expression": None,
+                    "stop_reason": "tool_complete",
+                    "prompt_tokens": 0,
+                    "generated_tokens": 0,
+                    "total_tokens": 0,
+                    "elapsed_time_sec": 0.0,
+                    "tokens_per_second": 0.0,
+                    "error_code": "session_not_found",
+                    "details": {"error": "Session not found"},
+                })
+                yield f"event: tool_result\ndata: {payload}\n\n"
+                done_payload = json.dumps({
+                    "request_id": req_id,
+                    "mode": request.mode,
+                    "origin": ORIGIN_GROUNDED_NEURAL,
+                    "model_generated": False,
+                    "prompt_tokens": 0,
+                    "generated_tokens": 0,
+                    "total_tokens": 0,
+                    "active_context_tokens": 0,
+                    "context_limit": 256,
+                    "context_cropped": False,
+                    "elapsed_time_sec": 0.0,
+                    "tokens_per_second": 0.0,
+                    "stop_reason": "tool_complete",
+                })
+                yield f"event: done\ndata: {done_payload}\n\n"
+
+            return StreamingResponse(
+                session_not_found_stream(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
         retriever = UserKnowledgeRetriever.from_session(session)
         k_res = retriever.retrieve(request.prompt)
         if k_res.status == "conflicting_evidence":
@@ -1178,6 +1335,7 @@ async def assistant_stream(
         cancel_event = threading.Event()
         worker_done = threading.Event()
         collected_chunks: List[str] = []
+        client_disconnected = False
 
         def inference_worker() -> None:
             try:
@@ -1223,6 +1381,7 @@ async def assistant_stream(
                     while True:
                         if await raw_request.is_disconnected():
                             logger.info("Client disconnected during assistant stream. Halting generation.")
+                            client_disconnected = True
                             cancel_event.set()
                             break
 
@@ -1286,7 +1445,7 @@ async def assistant_stream(
             final_tool_name = "UserKnowledgeRetriever" if grounded_chunk else None
             final_provenance = retrieval_details.get("source_display_name") if retrieval_details else None
 
-            if request.conversation_id:
+            if request.conversation_id and not client_disconnected:
                 try:
                     full_answer = "".join(collected_chunks)
                     chat_history_manager.add_message(request.conversation_id, role="user", content=request.prompt)
@@ -1342,9 +1501,24 @@ async def assistant_stream(
 # User Knowledge Endpoints (Ingestion, Retrieval, Management)
 # ---------------------------------------------------------------------------
 
+@app.post("/api/knowledge/session", response_model=KnowledgeSessionResponse, tags=["Knowledge"])
+async def create_knowledge_session() -> KnowledgeSessionResponse:
+    """Issue a new unguessable isolated knowledge session identifier."""
+    session = knowledge_store.create_session()
+    return KnowledgeSessionResponse(
+        session_id=session.session_id,
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+
 @app.post("/api/knowledge/source", response_model=KnowledgeSourceResponse, tags=["Knowledge"])
 async def create_knowledge_source(request: KnowledgeSourceCreateRequest) -> KnowledgeSourceResponse:
-    """Ingest a user-provided text document or pasted knowledge excerpt."""
+    """Ingest a user-provided text document or pasted knowledge excerpt into an active session."""
+    if not request.session_id or request.session_id.strip() == "default":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Session ID 'default' is not permitted. Please initialize an isolated knowledge session.",
+        )
     try:
         source = knowledge_store.add_source(
             session_id=request.session_id,
@@ -1363,6 +1537,11 @@ async def create_knowledge_source(request: KnowledgeSourceCreateRequest) -> Know
             chunk_count=len(source.chunks),
             created_at=source.created_at,
         )
+    except KeyError as k_err:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(k_err),
+        )
     except ValueError as val_err:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1371,8 +1550,13 @@ async def create_knowledge_source(request: KnowledgeSourceCreateRequest) -> Know
 
 
 @app.get("/api/knowledge/sources", response_model=List[KnowledgeSourceResponse], tags=["Knowledge"])
-async def list_knowledge_sources(session_id: str = "default") -> List[KnowledgeSourceResponse]:
+async def list_knowledge_sources(session_id: str) -> List[KnowledgeSourceResponse]:
     """List all ingested documents in the specified knowledge session."""
+    if not knowledge_store.session_exists(session_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Knowledge session '{session_id}' not found.",
+        )
     sources = knowledge_store.list_sources(session_id)
     return [
         KnowledgeSourceResponse(
@@ -1391,8 +1575,13 @@ async def list_knowledge_sources(session_id: str = "default") -> List[KnowledgeS
 
 
 @app.delete("/api/knowledge/source/{source_id}", tags=["Knowledge"])
-async def delete_knowledge_source(source_id: str, session_id: str = "default") -> dict:
+async def delete_knowledge_source(source_id: str, session_id: str) -> dict:
     """Delete a single document from the active session by ID."""
+    if not knowledge_store.session_exists(session_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Knowledge session '{session_id}' not found.",
+        )
     deleted = knowledge_store.delete_source(session_id, source_id)
     if not deleted:
         raise HTTPException(
@@ -1403,8 +1592,13 @@ async def delete_knowledge_source(source_id: str, session_id: str = "default") -
 
 
 @app.delete("/api/knowledge/sources", tags=["Knowledge"])
-async def clear_knowledge_sources(session_id: str = "default") -> dict:
+async def clear_knowledge_sources(session_id: str) -> dict:
     """Clear all documents from the active session."""
+    if not knowledge_store.session_exists(session_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Knowledge session '{session_id}' not found.",
+        )
     knowledge_store.clear_session(session_id)
     return {"success": True, "session_id": session_id}
 
@@ -1412,7 +1606,12 @@ async def clear_knowledge_sources(session_id: str = "default") -> dict:
 @app.post("/api/knowledge/retrieve", response_model=KnowledgeRetrieveResponse, tags=["Knowledge"])
 async def retrieve_knowledge(request: KnowledgeRetrieveRequest) -> KnowledgeRetrieveResponse:
     """Retrieve relevant chunks from session documents using BM25."""
-    session = knowledge_store.get_or_create_session(request.session_id)
+    session = knowledge_store.get_session(request.session_id)
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Knowledge session '{request.session_id}' not found.",
+        )
     retriever = UserKnowledgeRetriever.from_session(session)
     res = retriever.retrieve(request.query, top_k=request.top_k)
     return KnowledgeRetrieveResponse(

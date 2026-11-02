@@ -269,10 +269,10 @@ class KnowledgeSourceCreateRequest(BaseModel):
     """Request payload to ingest a user document into an active knowledge session."""
 
     session_id: str = Field(
-        default="default",
+        ...,
         min_length=1,
         max_length=64,
-        description="Session identifier to scope user documents.",
+        description="Unpredictable session identifier to scope user documents.",
     )
     display_name: str = Field(
         ...,
@@ -290,6 +290,13 @@ class KnowledgeSourceCreateRequest(BaseModel):
         default="pasted",
         description="Source type: 'pasted', 'txt', or 'md'.",
     )
+
+
+class KnowledgeSessionResponse(BaseModel):
+    """Schema for server-issued knowledge session identifier."""
+
+    session_id: str
+    created_at: str
 
 
 class KnowledgeSourceResponse(BaseModel):
@@ -310,10 +317,10 @@ class KnowledgeRetrieveRequest(BaseModel):
     """Parameters to search and retrieve relevant chunks from a knowledge session."""
 
     session_id: str = Field(
-        default="default",
+        ...,
         min_length=1,
         max_length=64,
-        description="Session identifier where documents are stored.",
+        description="Unpredictable session identifier where documents are stored.",
     )
     query: str = Field(
         ...,

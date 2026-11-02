@@ -16,6 +16,7 @@ from pathlib import Path
 import re
 import threading
 from typing import Any, Dict, List, Optional, Tuple, Union
+import uuid
 
 from src.bpe_tokenizer import BPETokenizer
 
@@ -246,16 +247,37 @@ def chunk_document_bpe(
 
 
 class KnowledgeStore:
-    """Thread-safe, in-memory knowledge repository scoped by session."""
+    """Thread-safe, in-memory knowledge repository scoped by unpredictable session identifiers."""
 
     def __init__(self, tokenizer: Optional[BPETokenizer] = None) -> None:
         self.tokenizer = tokenizer or get_default_tokenizer()
         self._sessions: Dict[str, KnowledgeSession] = {}
         self._lock = threading.RLock()
 
-    def get_or_create_session(self, session_id: str) -> KnowledgeSession:
+    def create_session(self) -> KnowledgeSession:
+        """Issue a new, unpredictable knowledge session identifier."""
         with self._lock:
-            sid = session_id.strip() if session_id else "default"
+            sid = f"ksess_{uuid.uuid4().hex}"
+            session = KnowledgeSession(session_id=sid)
+            self._sessions[sid] = session
+            logger.info(f"Created new isolated knowledge session: {sid}")
+            return session
+
+    def get_session(self, session_id: str) -> Optional[KnowledgeSession]:
+        """Fetch an existing session by its exact identifier. Returns None if unknown."""
+        if not session_id or not isinstance(session_id, str):
+            return None
+        with self._lock:
+            return self._sessions.get(session_id.strip())
+
+    def session_exists(self, session_id: str) -> bool:
+        """Check whether a knowledge session exists."""
+        return self.get_session(session_id) is not None
+
+    def get_or_create_session(self, session_id: str) -> KnowledgeSession:
+        """Helper to obtain an existing session or register a named session for tests."""
+        with self._lock:
+            sid = session_id.strip() if session_id else f"ksess_{uuid.uuid4().hex}"
             if sid not in self._sessions:
                 self._sessions[sid] = KnowledgeSession(session_id=sid)
             return self._sessions[sid]
@@ -343,17 +365,23 @@ class KnowledgeStore:
 
     def get_source(self, session_id: str, source_id: str) -> Optional[KnowledgeSource]:
         with self._lock:
-            session = self.get_or_create_session(session_id)
+            session = self.get_session(session_id)
+            if session is None:
+                return None
             return session.sources.get(source_id)
 
     def list_sources(self, session_id: str) -> List[KnowledgeSource]:
         with self._lock:
-            session = self.get_or_create_session(session_id)
+            session = self.get_session(session_id)
+            if session is None:
+                return []
             return list(session.sources.values())
 
     def delete_source(self, session_id: str, source_id: str) -> bool:
         with self._lock:
-            session = self.get_or_create_session(session_id)
+            session = self.get_session(session_id)
+            if session is None:
+                return False
             if source_id in session.sources:
                 del session.sources[source_id]
                 return True
@@ -361,13 +389,17 @@ class KnowledgeStore:
 
     def clear_session(self, session_id: str) -> bool:
         with self._lock:
-            session = self.get_or_create_session(session_id)
+            session = self.get_session(session_id)
+            if session is None:
+                return True
             session.sources.clear()
             return True
 
     def get_all_chunks(self, session_id: str) -> List[KnowledgeChunk]:
         with self._lock:
-            session = self.get_or_create_session(session_id)
+            session = self.get_session(session_id)
+            if session is None:
+                return []
             return session.get_all_chunks()
 
 

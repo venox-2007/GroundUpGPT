@@ -43,14 +43,19 @@ export default function ChatPage() {
   const [knowledgeMode, setKnowledgeMode] = useState<KnowledgeMode>("off");
   const [knowledgeSources, setKnowledgeSources] = useState<KnowledgeSource[]>([]);
   const [knowledgePanelOpen, setKnowledgePanelOpen] = useState<boolean>(false);
+  const [knowledgeSessionId, setKnowledgeSessionId] = useState<string | null>(null);
   const [newDocName, setNewDocName] = useState<string>("");
   const [newDocContent, setNewDocContent] = useState<string>("");
   const [isAddingDoc, setIsAddingDoc] = useState<boolean>(false);
+  const [fileUploadError, setFileUploadError] = useState<string | null>(null);
+  const [fileUploadSuccess, setFileUploadSuccess] = useState<string | null>(null);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [saveHistory, setSaveHistory] = useState<boolean>(false);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchConversations = async () => {
     try {
@@ -109,9 +114,11 @@ export default function ChatPage() {
     }
   };
 
-  const fetchKnowledgeSources = async () => {
+  const fetchKnowledgeSources = async (sid?: string) => {
+    const s = sid || knowledgeSessionId;
+    if (!s) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/knowledge/sources?session_id=default`);
+      const res = await fetch(`${API_BASE_URL}/api/knowledge/sources?session_id=${encodeURIComponent(s)}`);
       if (res.ok) {
         const data = await res.json();
         setKnowledgeSources(data);
@@ -121,38 +128,129 @@ export default function ChatPage() {
     }
   };
 
-  const handleAddKnowledge = async () => {
-    if (!newDocContent.trim()) return;
+  const initKnowledgeSession = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/knowledge/session`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        setKnowledgeSessionId(data.session_id);
+        await fetchKnowledgeSources(data.session_id);
+      }
+    } catch (err) {
+      console.error("Failed to initialize isolated knowledge session:", err);
+    }
+  };
+
+  const handleAddKnowledge = async (
+    overrideName?: string,
+    overrideContent?: string,
+    overrideType?: string
+  ) => {
+    const docContent = overrideContent !== undefined ? overrideContent : newDocContent;
+    const docName = overrideName !== undefined ? overrideName : newDocName;
+    const docType = overrideType || "txt";
+
+    if (!docContent.trim() || !knowledgeSessionId) return;
     try {
       setIsAddingDoc(true);
+      setFileUploadError(null);
       const res = await fetch(`${API_BASE_URL}/api/knowledge/source`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          session_id: "default",
-          display_name: newDocName.trim() || "pasted_note.txt",
-          content: newDocContent,
-          source_type: "txt",
+          session_id: knowledgeSessionId,
+          display_name: docName.trim() || "pasted_note.txt",
+          content: docContent,
+          source_type: docType,
         }),
       });
       if (res.ok) {
-        setNewDocName("");
-        setNewDocContent("");
+        if (overrideContent === undefined) {
+          setNewDocName("");
+          setNewDocContent("");
+        }
+        setFileUploadSuccess(`Document '${docName.trim() || "pasted_note.txt"}' ingested successfully.`);
+        setTimeout(() => setFileUploadSuccess(null), 4000);
         await fetchKnowledgeSources();
       } else {
         const err = await res.json().catch(() => ({ detail: "Upload failed" }));
-        alert(`Failed to add knowledge document: ${err.detail}`);
+        setFileUploadError(`Failed to add knowledge document: ${err.detail}`);
       }
+    } catch (err) {
+      setFileUploadError(`Network error adding document: ${err}`);
     } finally {
       setIsAddingDoc(false);
     }
   };
 
+  const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Reset input value so same file can be re-selected if desired
+    e.target.value = "";
+    setFileUploadError(null);
+    setFileUploadSuccess(null);
+
+    // Validation 1: Extension check (.txt or .md)
+    const lowerName = file.name.toLowerCase();
+    const isTxt = lowerName.endsWith(".txt");
+    const isMd = lowerName.endsWith(".md");
+    if (!isTxt && !isMd) {
+      setFileUploadError("Unsupported format. Only .txt and .md files are supported.");
+      return;
+    }
+
+    // Validation 2: Byte size check (<= 16 KB = 16,384 bytes)
+    if (file.size > 16384) {
+      setFileUploadError(`File size (${file.size} bytes) exceeds maximum limit of 16 KB (16,384 bytes).`);
+      return;
+    }
+
+    // Validation 3: Non-empty check
+    if (file.size === 0) {
+      setFileUploadError("File is empty (0 bytes).");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const text = event.target?.result;
+      if (typeof text !== "string") {
+        setFileUploadError("Failed to decode file as UTF-8 text.");
+        return;
+      }
+
+      // Validation 4: Reject binary null bytes
+      if (text.includes("\x00")) {
+        setFileUploadError("Binary or null bytes detected in file. Only clean UTF-8 text files are accepted.");
+        return;
+      }
+
+      // Validation 5: Reject empty / whitespace-only content
+      if (!text.trim()) {
+        setFileUploadError("File content cannot be empty or whitespace-only.");
+        return;
+      }
+
+      // Automatically ingest validated file content
+      await handleAddKnowledge(file.name, text, isMd ? "md" : "txt");
+    };
+
+    reader.onerror = () => {
+      setFileUploadError("Error reading local file.");
+    };
+
+    reader.readAsText(file, "UTF-8");
+  };
+
   const handleDeleteKnowledge = async (sourceId: string) => {
+    if (!knowledgeSessionId) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/knowledge/source/${sourceId}?session_id=default`, {
-        method: "DELETE",
-      });
+      const res = await fetch(
+        `${API_BASE_URL}/api/knowledge/source/${sourceId}?session_id=${encodeURIComponent(knowledgeSessionId)}`,
+        { method: "DELETE" }
+      );
       if (res.ok) {
         await fetchKnowledgeSources();
       }
@@ -163,7 +261,7 @@ export default function ChatPage() {
 
   // Poll server health & model information on mount
   useEffect(() => {
-    fetchKnowledgeSources();
+    initKnowledgeSession();
     fetchConversations();
     async function checkStatus() {
       try {
@@ -237,7 +335,7 @@ export default function ChatPage() {
     abortControllerRef.current = abortController;
 
     let convId = activeConversationId;
-    if (!convId) {
+    if (saveHistory && !convId) {
       try {
         const createRes = await fetch(`${API_BASE_URL}/api/history/conversations`, {
           method: "POST",
@@ -261,9 +359,9 @@ export default function ChatPage() {
         body: JSON.stringify({
           prompt: promptText,
           mode: chatMode,
-          knowledge_mode: knowledgeMode,
-          knowledge_session_id: "default",
-          conversation_id: convId || undefined,
+          knowledge_mode: chatMode === "native" ? "off" : knowledgeMode,
+          knowledge_session_id: chatMode === "native" ? undefined : (knowledgeSessionId || undefined),
+          conversation_id: saveHistory ? (convId || undefined) : undefined,
           max_new_tokens: settings.max_new_tokens,
           temperature: settings.temperature,
           top_k: settings.top_k,
@@ -441,6 +539,8 @@ export default function ChatPage() {
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
         onDeleteConversation={handleDeleteConversation}
+        saveHistory={saveHistory}
+        onToggleSaveHistory={setSaveHistory}
       />
 
       {/* Main Chat Interface */}
@@ -475,17 +575,32 @@ export default function ChatPage() {
 
           {/* Mode & Knowledge Controls */}
           <div className="flex items-center gap-2">
+            {/* Persistence Indicator Pill (Step 47) */}
+            <div
+              className="flex items-center gap-1.5 rounded border border-slate-800 bg-slate-950 px-2 py-1 text-xs font-mono cursor-pointer hover:border-slate-700 transition"
+              onClick={() => setSaveHistory(!saveHistory)}
+              title={saveHistory ? "Chat persistence: ON (Saving to SQLite). Click to turn off." : "Chat persistence: OFF (In-Memory Only). Click to turn on."}
+            >
+              <span className={`inline-block h-2 w-2 rounded-full ${saveHistory ? "bg-teal-400" : "bg-slate-500"}`} />
+              <span className={saveHistory ? "text-teal-300 font-medium" : "text-slate-400"}>
+                {saveHistory ? "Saving Chat" : "History Off"}
+              </span>
+            </div>
+
             {/* Mode Selector Toggle */}
             <div className="flex items-center gap-1 rounded-lg bg-slate-950 p-1 border border-slate-800">
               <button
                 type="button"
-                onClick={() => setChatMode("native")}
+                onClick={() => {
+                  setChatMode("native");
+                  setKnowledgeMode("off");
+                }}
                 className={`rounded px-2.5 py-1 text-xs font-medium transition ${
                   chatMode === "native"
                     ? "bg-slate-800 text-slate-100 shadow-sm border border-slate-700"
                     : "text-slate-400 hover:text-slate-200"
                 }`}
-                title="Native GPT: Responses generated by your locally trained Transformer."
+                title="Native GPT: Responses generated purely by your locally trained Transformer without tools or retrieval."
               >
                 Native GPT
               </button>
@@ -497,7 +612,7 @@ export default function ChatPage() {
                     ? "bg-indigo-950 text-indigo-300 shadow-sm border border-indigo-800"
                     : "text-slate-400 hover:text-slate-200"
                 }`}
-                title="Tool-Assisted: Uses local tools for supported calculations and facts; other conversations use the selected GPT."
+                title="Tool-Assisted: Uses deterministic tools for math/facts, with optional evidence or grounded neural answering."
               >
                 Tool-Assisted
               </button>
@@ -519,33 +634,49 @@ export default function ChatPage() {
               </button>
               <button
                 type="button"
+                disabled={chatMode === "native"}
                 onClick={() => {
+                  if (chatMode === "native") return;
                   setKnowledgeMode("evidence");
                   setKnowledgePanelOpen(true);
                   fetchKnowledgeSources();
                 }}
                 className={`rounded px-2 py-0.5 text-xs font-medium transition ${
-                  knowledgeMode === "evidence"
+                  chatMode === "native"
+                    ? "opacity-40 cursor-not-allowed text-slate-500"
+                    : knowledgeMode === "evidence"
                     ? "bg-amber-950 text-amber-300 shadow-sm border border-amber-800"
                     : "text-slate-400 hover:text-slate-200"
                 }`}
-                title="Show Source Evidence: Returns exact matching document passage without model hallucination (0 model calls)."
+                title={
+                  chatMode === "native"
+                    ? "Knowledge retrieval is inactive in Native GPT mode. Switch to Tool-Assisted to enable."
+                    : "Show Source Evidence: Returns exact matching document passage without model hallucination (0 model calls)."
+                }
               >
                 Evidence
               </button>
               <button
                 type="button"
+                disabled={chatMode === "native"}
                 onClick={() => {
+                  if (chatMode === "native") return;
                   setKnowledgeMode("grounded");
                   setKnowledgePanelOpen(true);
                   fetchKnowledgeSources();
                 }}
                 className={`rounded px-2 py-0.5 text-xs font-medium transition ${
-                  knowledgeMode === "grounded"
+                  chatMode === "native"
+                    ? "opacity-40 cursor-not-allowed text-slate-500"
+                    : knowledgeMode === "grounded"
                     ? "bg-indigo-950 text-indigo-300 shadow-sm border border-indigo-800"
                     : "text-slate-400 hover:text-slate-200"
                 }`}
-                title="Experimental Grounded GPT: Injects retrieved passage into model prompt context."
+                title={
+                  chatMode === "native"
+                    ? "Grounded neural generation is inactive in Native GPT mode. Switch to Tool-Assisted to enable."
+                    : "Experimental Grounded GPT: Injects retrieved passage into model prompt context."
+                }
               >
                 Grounded
               </button>
@@ -581,9 +712,42 @@ export default function ChatPage() {
             <div className="flex flex-col md:flex-row gap-4">
               {/* Document Ingestion Form */}
               <div className="flex-1 flex flex-col gap-2">
-                <span className="font-semibold text-slate-200 font-mono text-[11px]">
-                  + Add Document / Knowledge Passage (Max 16 KB)
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-slate-200 font-mono text-[11px]">
+                    + Add Document / Knowledge Passage (Max 16 KB)
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      accept=".txt,.md"
+                      onChange={handleFileSelected}
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isAddingDoc}
+                      className="flex items-center gap-1 rounded border border-slate-700 bg-slate-800 px-2 py-0.5 text-[11px] text-slate-200 hover:bg-slate-700 transition disabled:opacity-50"
+                      title="Upload local .txt or .md file (max 16 KB)"
+                    >
+                      <span>📁</span>
+                      <span>Upload .txt / .md</span>
+                    </button>
+                  </div>
+                </div>
+
+                {fileUploadError && (
+                  <div className="rounded border border-rose-800 bg-rose-950/60 px-2.5 py-1 text-[11px] text-rose-300">
+                    ⚠️ {fileUploadError}
+                  </div>
+                )}
+                {fileUploadSuccess && (
+                  <div className="rounded border border-teal-800 bg-teal-950/60 px-2.5 py-1 text-[11px] text-teal-300">
+                    ✓ {fileUploadSuccess}
+                  </div>
+                )}
+
                 <input
                   type="text"
                   placeholder="Document Title (e.g. project_apollo.txt)"
@@ -604,7 +768,7 @@ export default function ChatPage() {
                   </span>
                   <button
                     type="button"
-                    onClick={handleAddKnowledge}
+                    onClick={() => handleAddKnowledge()}
                     disabled={isAddingDoc || !newDocContent.trim()}
                     className="rounded bg-teal-600 px-3 py-1 text-xs font-medium text-white hover:bg-teal-500 disabled:opacity-50"
                   >
@@ -622,7 +786,7 @@ export default function ChatPage() {
                 </div>
                 {knowledgeSources.length === 0 ? (
                   <p className="text-[11px] text-slate-500 italic py-2">
-                    No documents ingested yet. Add a passage on the left to enable document-attributed retrieval.
+                    No documents ingested yet. Add a passage on the left or upload a file to enable document-attributed retrieval.
                   </p>
                 ) : (
                   <div className="max-h-28 overflow-y-auto space-y-1.5 pr-1">
@@ -662,17 +826,21 @@ export default function ChatPage() {
             </span>
             <span>
               {chatMode === "native"
-                ? "Responses generated by your locally trained Transformer."
-                : "Uses local tools for supported calculations and facts; other conversations use the selected GPT."}
+                ? "Pure neural autoregressive inference directly from the locally trained checkpoint."
+                : "Deterministic local tools for exact calculations and facts; fallback or grounded neural for other queries."}
             </span>
-            {knowledgeMode !== "off" && (
-              <span className="ml-2 rounded px-1.5 py-0.2 text-[10px] font-mono border border-amber-800 bg-amber-950/60 text-amber-300">
+            {chatMode === "native" ? (
+              <span className="ml-2 rounded px-1.5 py-0.5 text-[10px] font-mono border border-slate-700 bg-slate-950 text-slate-400">
+                Knowledge: Inactive (Pure Neural Isolation)
+              </span>
+            ) : knowledgeMode !== "off" ? (
+              <span className="ml-2 rounded px-1.5 py-0.5 text-[10px] font-mono border border-amber-800 bg-amber-950/60 text-amber-300">
                 Knowledge: {knowledgeMode === "evidence" ? "Evidence Mode (0 model calls)" : "Grounded GPT Mode"}
               </span>
-            )}
+            ) : null}
           </div>
           <span className="hidden sm:inline font-mono text-[10px] text-slate-500">
-            Mode: {chatMode} • Knowledge: {knowledgeMode}
+            Mode: {chatMode} • Knowledge: {chatMode === "native" ? "off" : knowledgeMode} • History: {saveHistory ? "persisted" : "in-memory"}
           </span>
         </div>
 

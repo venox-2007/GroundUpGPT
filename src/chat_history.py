@@ -250,6 +250,18 @@ class ChatHistoryManager:
             conn.commit()
             return cur.rowcount
 
+    def cleanup_empty_conversations(self) -> int:
+        """Remove conversations that have zero messages."""
+        with self._lock, self._get_connection() as conn:
+            cur = conn.execute("DELETE FROM conversations WHERE message_count = 0")
+            conn.commit()
+            return cur.rowcount
+
+    def checkpoint_wal(self) -> None:
+        """Explicitly flush and truncate the SQLite write-ahead log."""
+        with self._lock, self._get_connection() as conn:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+
     def add_message(
         self,
         conversation_id: str,
@@ -285,6 +297,31 @@ class ChatHistoryManager:
             else:
                 c_title = c_row["title"]
                 c_count = c_row["message_count"]
+
+            # Prevent immediate duplicate message insertion
+            last_msg = conn.execute(
+                """
+                SELECT id, role, content, origin, model_profile, created_at, details_json
+                FROM messages
+                WHERE conversation_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (conversation_id,),
+            ).fetchone()
+
+            if last_msg and last_msg["role"] == role and last_msg["content"] == content and last_msg["origin"] == origin:
+                last_details = json.loads(last_msg["details_json"]) if last_msg["details_json"] else {}
+                return {
+                    "id": last_msg["id"],
+                    "conversation_id": conversation_id,
+                    "role": last_msg["role"],
+                    "content": last_msg["content"],
+                    "origin": last_msg["origin"],
+                    "model_profile": last_msg["model_profile"],
+                    "created_at": last_msg["created_at"],
+                    "details": last_details,
+                }
 
             # If title is default and user sends first message, derive clean title
             if role == "user" and c_title in ("New Conversation", "Untitled"):

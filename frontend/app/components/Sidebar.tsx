@@ -20,6 +20,8 @@ interface SidebarProps {
   onSelectConversation?: (id: string) => void;
   onNewConversation?: () => void;
   onDeleteConversation?: (id: string) => void;
+  saveHistory?: boolean;
+  onToggleSaveHistory?: (val: boolean) => void;
 }
 
 export function Sidebar({
@@ -39,6 +41,8 @@ export function Sidebar({
   onSelectConversation,
   onNewConversation,
   onDeleteConversation,
+  saveHistory = false,
+  onToggleSaveHistory,
 }: SidebarProps) {
   const [showSettings, setShowSettings] = useState(true);
 
@@ -153,6 +157,34 @@ export function Sidebar({
             >
               ✕
             </button>
+          </div>
+
+          {/* History Persistence Toggle (Step 47) */}
+          <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-300">Save Chat History</span>
+              <button
+                type="button"
+                onClick={() => onToggleSaveHistory && onToggleSaveHistory(!saveHistory)}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                  saveHistory ? "bg-teal-600" : "bg-slate-700"
+                }`}
+                title={saveHistory ? "Chat persistence is ON: messages saved to local SQLite" : "Chat persistence is OFF: running in memory only"}
+              >
+                <span
+                  aria-hidden="true"
+                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                    saveHistory ? "translate-x-4" : "translate-x-0"
+                  }`}
+                />
+              </button>
+            </div>
+            <div className="mt-1 flex items-center gap-1.5 text-[10px]">
+              <span className={`inline-block h-1.5 w-1.5 rounded-full ${saveHistory ? "bg-teal-400" : "bg-slate-500"}`} />
+              <span className="text-slate-400 font-mono">
+                {saveHistory ? "ON (Saving to SQLite)" : "OFF (In-Memory Only)"}
+              </span>
+            </div>
           </div>
 
           {/* New Conversation & Saved Sessions (Step 46) */}

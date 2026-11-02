@@ -13,6 +13,11 @@ export interface KnowledgeSource {
   created_at: string;
 }
 
+export interface KnowledgeSessionResponse {
+  session_id: string;
+  created_at: string;
+}
+
 export interface MessageMetrics {
   promptTokens?: number;
   generatedTokens?: number;

@@ -155,6 +155,11 @@ The project spans two primary domains: the **Custom AI Engine** and the **Full-S
 
 ---
 
+17. **Phase 17: Privacy Hardening, Mode Isolation & Acceptance Testing** *(Step 47)*
+    - Step 47: Privacy hardening, mode isolation, complete file upload, and real-model acceptance testing. Made chat history persistence genuinely opt-in with a dedicated UI toggle (default: OFF, zero SQLite writes or session creation when inactive, in-memory stream operation). Replaced shared "default" session identifiers with server-issued unguessable knowledge session IDs (`ksess_<uuid4_hex>` via `POST /api/knowledge/session`), enforcing strict session isolation, safe 404 responses for unknown sessions, and complete chunk purge on source deletion. Enforced strict Native GPT mode isolation on both backend and frontend: requests in `native` mode force `knowledge_mode="off"`, guaranteeing pure neural execution with zero tool or document retrieval leakage. Implemented client-side TXT and Markdown file upload (`.txt`, `.md`) with validation (<= 16 KB, UTF-8 decoding, binary/null rejection, non-empty check). Audited SQLite history for duplicate message deduplication, WAL checkpointing, empty conversation cleanup, and streaming cancellation safety. Conducted real-model acceptance evaluation on the actual 27,411,456-parameter checkpoint (`checkpoints/27m_sft_anchors_v1/model_27m_anchors_best.pt`, strict load verified, fingerprint `41384617...`) across 35 diverse queries in 5 categories, honestly separating deterministic tool accuracy from neural capabilities. Added 8 privacy boundary tests (`tests/test_privacy_and_isolation.py`), verified 347/347 passing pytest suite, Next.js production build, and launcher preflight. *(Implemented)*
+
+---
+
 ## 6. Engineering Quality & Verification Standards
 
 - **Strict Type Annotations**: Every internal module must employ Python type hints.
