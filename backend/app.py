@@ -522,6 +522,10 @@ async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
         if k_res.status == "relevant_passage" and k_res.chunk:
             ans_text = k_res.chunk.text
             err = None
+        elif k_res.status == "conflicting_evidence":
+            msg = k_res.conflict_details.get("message") if k_res.conflict_details else "Contradictory records detected."
+            ans_text = f"⚠️ Conflicting Evidence Detected across active documents:\n{msg}\n\nPlease check your source documents to resolve the contradiction."
+            err = "conflicting_evidence"
         else:
             ans_text = f"No unambiguous evidence passage found in active knowledge documents (status: {k_res.status})."
             err = k_res.error_code or k_res.status
@@ -552,6 +556,9 @@ async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
                 "end_char": k_res.chunk.end_char if k_res.chunk else None,
                 "score": k_res.score,
                 "status": k_res.status,
+                "conflict_detected": k_res.conflict_detected,
+                "conflicting_sources": k_res.conflicting_sources,
+                "conflict_details": k_res.conflict_details,
                 "candidates": k_res.candidates,
             },
         )
@@ -608,22 +615,43 @@ async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
             details=decision.details,
         )
 
-    # 4. Neural generation path (Native, Fallback, or Grounded)
-    if not model_manager.is_loaded or model_manager.generator is None or model_manager.model is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Model is not loaded. Run 'python scripts/generate_demo.py' or load a checkpoint profile.",
-        )
-
-    is_sft = bool(model_manager.model_info and getattr(model_manager.model_info, "is_sft", False))
-
     grounded_chunk = None
     retrieval_details = None
     if request.knowledge_mode == "grounded":
         session = knowledge_store.get_or_create_session(request.knowledge_session_id or "default")
         retriever = UserKnowledgeRetriever.from_session(session)
         k_res = retriever.retrieve(request.prompt)
-        if k_res.status == "relevant_passage" and k_res.chunk:
+        if k_res.status == "conflicting_evidence":
+            # Hallucination Guardrail: do not feed conflicting facts to neural model
+            elapsed = time.perf_counter() - start_time
+            msg = k_res.conflict_details.get("message") if k_res.conflict_details else "Contradictory records detected."
+            return AssistantResponse(
+                request_id=req_id,
+                mode=request.mode,
+                origin=ORIGIN_DOCUMENT_EXCERPT,
+                answer_text=f"⚠️ Grounding Guardrail: Conflicting Evidence Detected:\n{msg}\n\nNeural generation halted to prevent hallucinating between contradictory source documents.",
+                model_generated=False,
+                model_profile=None,
+                tool_name="UserKnowledgeRetriever",
+                fact_id=None,
+                provenance=k_res.source_display_name,
+                evaluated_expression=None,
+                stop_reason="tool_complete",
+                prompt_tokens=0,
+                generated_tokens=0,
+                total_tokens=0,
+                elapsed_time_sec=round(elapsed, 4),
+                tokens_per_second=0.0,
+                error_code="conflicting_evidence",
+                details={
+                    "conflict_detected": True,
+                    "conflicting_sources": k_res.conflicting_sources,
+                    "conflict_details": k_res.conflict_details,
+                    "status": k_res.status,
+                    "candidates": k_res.candidates,
+                },
+            )
+        elif k_res.status == "relevant_passage" and k_res.chunk:
             grounded_chunk = k_res.chunk
             retrieval_details = {
                 "source_id": k_res.source_id,
@@ -633,24 +661,33 @@ async def assistant_respond(request: AssistantRequest) -> AssistantResponse:
                 "end_char": k_res.chunk.end_char,
                 "score": k_res.score,
                 "status": k_res.status,
+                "conflict_detected": False,
                 "candidates": k_res.candidates,
             }
+
+    # 4. Neural generation path (Native, Fallback, or Grounded)
+    if not model_manager.is_loaded or model_manager.generator is None or model_manager.model is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Model is not loaded. Run 'python scripts/generate_demo.py' or load a checkpoint profile.",
+        )
+
+    is_sft = bool(model_manager.model_info and getattr(model_manager.model_info, "is_sft", False))
 
     context_str = grounded_chunk.text if grounded_chunk else None
 
     if is_sft:
         from src.generation import format_sft_prompt
+        from src.user_knowledge import budget_context_bpe
         if context_str:
-            prompt_to_run = format_sft_prompt(request.prompt, context=context_str)
-            try:
-                tok_ids = model_manager.generator.tokenizer.encode(prompt_to_run)
-                # Budget check: keep prompt + context <= 190 to allow >= 66 tokens for generation
-                while len(tok_ids) > 190 and len(context_str) > 30:
-                    context_str = context_str[: int(len(context_str) * 0.8)].rstrip()
-                    prompt_to_run = format_sft_prompt(request.prompt, context=context_str)
-                    tok_ids = model_manager.generator.tokenizer.encode(prompt_to_run)
-            except Exception:
-                pass
+            budgeted_context = budget_context_bpe(
+                prompt=request.prompt,
+                context=context_str,
+                tokenizer=model_manager.generator.tokenizer,
+                max_total_prompt_tokens=190,
+            )
+            context_str = budgeted_context
+            prompt_to_run = format_sft_prompt(request.prompt, context=budgeted_context)
         else:
             prompt_to_run = format_sft_prompt(request.prompt)
     else:
@@ -786,6 +823,10 @@ async def assistant_stream(
         if k_res.status == "relevant_passage" and k_res.chunk:
             ans_text = k_res.chunk.text
             err = None
+        elif k_res.status == "conflicting_evidence":
+            msg = k_res.conflict_details.get("message") if k_res.conflict_details else "Contradictory records detected."
+            ans_text = f"⚠️ Conflicting Evidence Detected across active documents:\n{msg}\n\nPlease check your source documents to resolve the contradiction."
+            err = "conflicting_evidence"
         else:
             ans_text = f"No unambiguous evidence passage found in active knowledge documents (status: {k_res.status})."
             err = k_res.error_code or k_res.status
@@ -817,6 +858,9 @@ async def assistant_stream(
                     "end_char": k_res.chunk.end_char if k_res.chunk else None,
                     "score": k_res.score,
                     "status": k_res.status,
+                    "conflict_detected": k_res.conflict_detected,
+                    "conflicting_sources": k_res.conflicting_sources,
+                    "conflict_details": k_res.conflict_details,
                     "candidates": k_res.candidates,
                 },
             })
@@ -905,22 +949,73 @@ async def assistant_stream(
             },
         )
 
-    # 4. Neural generation streaming path (Native or Grounded)
-    if not model_manager.is_loaded or model_manager.generator is None or model_manager.model is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Model is not loaded. Run 'python scripts/generate_demo.py' or load a checkpoint profile.",
-        )
-
-    is_sft = bool(model_manager.model_info and getattr(model_manager.model_info, "is_sft", False))
-
+    # Check grounded guardrail before starting worker thread
     grounded_chunk = None
     retrieval_details = None
     if request.knowledge_mode == "grounded":
         session = knowledge_store.get_or_create_session(request.knowledge_session_id or "default")
         retriever = UserKnowledgeRetriever.from_session(session)
         k_res = retriever.retrieve(request.prompt)
-        if k_res.status == "relevant_passage" and k_res.chunk:
+        if k_res.status == "conflicting_evidence":
+            # Hallucination Guardrail in streaming mode
+            elapsed = time.perf_counter() - start_time
+            msg = k_res.conflict_details.get("message") if k_res.conflict_details else "Contradictory records detected."
+
+            async def guardrail_stream() -> AsyncIterator[str]:
+                payload = json.dumps({
+                    "request_id": req_id,
+                    "mode": request.mode,
+                    "origin": ORIGIN_DOCUMENT_EXCERPT,
+                    "answer_text": f"⚠️ Grounding Guardrail: Conflicting Evidence Detected:\n{msg}\n\nNeural generation halted to prevent hallucinating between contradictory source documents.",
+                    "model_generated": False,
+                    "model_profile": None,
+                    "tool_name": "UserKnowledgeRetriever",
+                    "fact_id": None,
+                    "provenance": k_res.source_display_name,
+                    "evaluated_expression": None,
+                    "stop_reason": "tool_complete",
+                    "prompt_tokens": 0,
+                    "generated_tokens": 0,
+                    "total_tokens": 0,
+                    "elapsed_time_sec": round(elapsed, 4),
+                    "tokens_per_second": 0.0,
+                    "error_code": "conflicting_evidence",
+                    "details": {
+                        "conflict_detected": True,
+                        "conflicting_sources": k_res.conflicting_sources,
+                        "conflict_details": k_res.conflict_details,
+                        "status": k_res.status,
+                        "candidates": k_res.candidates,
+                    },
+                })
+                yield f"event: tool_result\ndata: {payload}\n\n"
+                done_payload = json.dumps({
+                    "request_id": req_id,
+                    "mode": request.mode,
+                    "origin": ORIGIN_DOCUMENT_EXCERPT,
+                    "model_generated": False,
+                    "prompt_tokens": 0,
+                    "generated_tokens": 0,
+                    "total_tokens": 0,
+                    "active_context_tokens": 0,
+                    "context_limit": 256,
+                    "context_cropped": False,
+                    "elapsed_time_sec": round(elapsed, 4),
+                    "tokens_per_second": 0.0,
+                    "stop_reason": "tool_complete",
+                })
+                yield f"event: done\ndata: {done_payload}\n\n"
+
+            return StreamingResponse(
+                guardrail_stream(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
+        elif k_res.status == "relevant_passage" and k_res.chunk:
             grounded_chunk = k_res.chunk
             retrieval_details = {
                 "source_id": k_res.source_id,
@@ -930,23 +1025,32 @@ async def assistant_stream(
                 "end_char": k_res.chunk.end_char,
                 "score": k_res.score,
                 "status": k_res.status,
+                "conflict_detected": False,
                 "candidates": k_res.candidates,
             }
+
+    # 4. Neural generation streaming path (Native or Grounded)
+    if not model_manager.is_loaded or model_manager.generator is None or model_manager.model is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Model is not loaded. Run 'python scripts/generate_demo.py' or load a checkpoint profile.",
+        )
+
+    is_sft = bool(model_manager.model_info and getattr(model_manager.model_info, "is_sft", False))
 
     context_str = grounded_chunk.text if grounded_chunk else None
 
     if is_sft:
         from src.generation import format_sft_prompt
+        from src.user_knowledge import budget_context_bpe
         if context_str:
-            prompt_to_run = format_sft_prompt(request.prompt, context=context_str)
-            try:
-                tok_ids = model_manager.generator.tokenizer.encode(prompt_to_run)
-                while len(tok_ids) > 190 and len(context_str) > 30:
-                    context_str = context_str[: int(len(context_str) * 0.8)].rstrip()
-                    prompt_to_run = format_sft_prompt(request.prompt, context=context_str)
-                    tok_ids = model_manager.generator.tokenizer.encode(prompt_to_run)
-            except Exception:
-                pass
+            budgeted_context = budget_context_bpe(
+                prompt=request.prompt,
+                context=context_str,
+                tokenizer=model_manager.generator.tokenizer,
+                max_total_prompt_tokens=190,
+            )
+            prompt_to_run = format_sft_prompt(request.prompt, context=budgeted_context)
         else:
             prompt_to_run = format_sft_prompt(request.prompt)
         stop_seqs = ["<|endoftext|>", "<|user|>", "<|assistant|>"]

@@ -70,6 +70,6 @@ def test_retrieval_ambiguous_evidence(store: KnowledgeStore):
     retriever = UserKnowledgeRetriever.from_session(store.get_or_create_session(sid))
     res = retriever.retrieve("Who completed Project Orion in 2021?")
 
-    assert res.status == "ambiguous_evidence"
+    assert res.status in ("ambiguous_evidence", "conflicting_evidence")
     assert res.is_ambiguous is True
     assert len(res.candidates) >= 2

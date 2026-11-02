@@ -373,3 +373,55 @@ class KnowledgeStore:
 
 # Global in-memory singleton
 knowledge_store = KnowledgeStore()
+
+
+def budget_context_bpe(
+    prompt: str,
+    context: str,
+    tokenizer: Optional[BPETokenizer] = None,
+    max_total_prompt_tokens: int = 190,
+) -> str:
+    """Budget and truncate context at sentence boundaries so total prompt tokens <= max_total_prompt_tokens.
+
+    Leaves guaranteed headroom for answer generation within the 256-token context limit.
+    """
+    if not context or not context.strip():
+        return ""
+
+    from src.generation import format_sft_prompt
+
+    tok = tokenizer or get_default_tokenizer()
+
+    if len(tok.encode(format_sft_prompt(prompt, context=context))) <= max_total_prompt_tokens:
+        return context
+
+    # Split into clean sentence units
+    sentences = [
+        m.group(0).strip()
+        for m in re.finditer(r"[^.!?\n]+(?:[.!?]+|\n+|\Z)", context)
+        if m.group(0).strip()
+    ]
+    accum: List[str] = []
+    for s in sentences:
+        cand = (" " if accum else "").join(accum + [s])
+        cand_prompt = format_sft_prompt(prompt, context=cand)
+        if len(tok.encode(cand_prompt)) <= max_total_prompt_tokens:
+            accum.append(s)
+        else:
+            break
+
+    if accum:
+        return " ".join(accum)
+
+    # Word boundary fallback if even first sentence is long
+    words = context.split()
+    accum_w: List[str] = []
+    for w in words:
+        cand = " ".join(accum_w + [w]) + "..."
+        cand_prompt = format_sft_prompt(prompt, context=cand)
+        if len(tok.encode(cand_prompt)) <= max_total_prompt_tokens:
+            accum_w.append(w)
+        else:
+            break
+
+    return (" ".join(accum_w) + "...") if accum_w else ""

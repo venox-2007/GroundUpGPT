@@ -250,6 +250,12 @@ export function ChatMessageItem({
                     {isDocumentExcerpt ? "Raw Document Passage (0 Model Calls)" : "Grounded Prompt Conditioning"}
                   </span>
                 </div>
+                {message.details?.conflict_detected && (
+                  <div className="mt-2 rounded border border-rose-900/80 bg-rose-950/60 p-2 text-[11px] text-rose-300">
+                    <span className="font-bold">⚠️ Contradiction Warning: </span>
+                    {message.details?.conflict_details?.message || "Contradictory information detected across sources."}
+                  </div>
+                )}
               </div>
             )}
           </div>
