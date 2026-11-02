@@ -118,10 +118,11 @@ def build_raw_conversational_v2_pool() -> List[Dict[str, str]]:
         ("Good night!", "Good night! Sleep well and take care."),
         ("That is all for today.", "Sounds good! Have a great day and feel free to return anytime."),
     ]
-    for p, r in greetings:
-        items.append({"category": "greetings_persona", "prompt": p, "response": r})
+    for i, (p, r) in enumerate(greetings):
+        cid = f"greet_{i:03d}"
+        items.append({"concept_id": cid, "category": "greetings_persona", "prompt": p, "response": r})
         # Add slight polite prefix variations
-        items.append({"category": "greetings_persona", "prompt": f"Can you tell me: {p.lower()}", "response": r})
+        items.append({"concept_id": cid, "category": "greetings_persona", "prompt": f"Can you tell me: {p.lower()}", "response": r})
 
     # 2. Short Direct Factual QA (~200 examples, strictly disjoint from benchmark)
     facts = [
@@ -192,12 +193,13 @@ def build_raw_conversational_v2_pool() -> List[Dict[str, str]]:
         ("What is the currency of South Korea?", "The currency of South Korea is the South Korean Won."),
         ("What is the currency of Mexico?", "The currency of Mexico is the Mexican Peso."),
     ]
-    for p, r in facts:
-        items.append({"category": "short_direct_facts", "prompt": p, "response": r})
-        items.append({"category": "short_direct_facts", "prompt": f"Please answer: {p}", "response": r})
+    for i, (p, r) in enumerate(facts):
+        cid = f"fact_{i:03d}"
+        items.append({"concept_id": cid, "category": "short_direct_facts", "prompt": p, "response": r})
+        items.append({"concept_id": cid, "category": "short_direct_facts", "prompt": f"Please answer: {p}", "response": r})
         # Concise variant
         concise_ans = r.split(" is ")[-1].rstrip(".") if " is " in r else r
-        items.append({"category": "short_direct_facts", "prompt": f"Short answer: {p}", "response": concise_ans + "."})
+        items.append({"concept_id": cid, "category": "short_direct_facts", "prompt": f"Short answer: {p}", "response": concise_ans + "."})
 
     # 3. Everyday Conversational Q&A (~100 examples)
     everyday = [
@@ -229,9 +231,10 @@ def build_raw_conversational_v2_pool() -> List[Dict[str, str]]:
         ("Why is it important to recycle plastic and paper?", "Recycling conserves natural resources, reduces landfill waste, and lowers pollution."),
         ("How do you extinguish a small campfire?", "Pour water over the embers, stir the ashes with a stick, and pour more water until completely cool."),
     ]
-    for p, r in everyday:
-        items.append({"category": "everyday_conversational", "prompt": p, "response": r})
-        items.append({"category": "everyday_conversational", "prompt": f"Can you explain: {p}", "response": r})
+    for i, (p, r) in enumerate(everyday):
+        cid = f"everyday_{i:03d}"
+        items.append({"concept_id": cid, "category": "everyday_conversational", "prompt": p, "response": r})
+        items.append({"concept_id": cid, "category": "everyday_conversational", "prompt": f"Can you explain: {p}", "response": r})
 
     # 4. Definitions (~100 examples)
     definitions = [
@@ -264,9 +267,10 @@ def build_raw_conversational_v2_pool() -> List[Dict[str, str]]:
         ("What is density in physics?", "Density is the ratio of an object's mass to its volume (mass divided by volume)."),
         ("What is a prime number?", "A prime number is a positive integer greater than 1 that is divisible only by 1 and itself."),
     ]
-    for p, r in definitions:
-        items.append({"category": "definitions", "prompt": p, "response": r})
-        items.append({"category": "definitions", "prompt": f"In one sentence, explain: {p}", "response": r})
+    for i, (p, r) in enumerate(definitions):
+        cid = f"def_{i:03d}"
+        items.append({"concept_id": cid, "category": "definitions", "prompt": p, "response": r})
+        items.append({"concept_id": cid, "category": "definitions", "prompt": f"In one sentence, explain: {p}", "response": r})
 
     # 5. Basic Science (~100 examples)
     science = [
@@ -300,9 +304,10 @@ def build_raw_conversational_v2_pool() -> List[Dict[str, str]]:
         ("What scale measures earthquake magnitude?", "The Richter scale and moment magnitude scale measure earthquake magnitude."),
         ("What is the speed of light in vacuum approximately in km/s?", "The speed of light in a vacuum is approximately 300,000 kilometers per second."),
     ]
-    for p, r in science:
-        items.append({"category": "basic_science", "prompt": p, "response": r})
-        items.append({"category": "basic_science", "prompt": f"Science question: {p}", "response": r})
+    for i, (p, r) in enumerate(science):
+        cid = f"sci_{i:03d}"
+        items.append({"concept_id": cid, "category": "basic_science", "prompt": p, "response": r})
+        items.append({"concept_id": cid, "category": "basic_science", "prompt": f"Science question: {p}", "response": r})
 
     # 6. Python Concepts (~100 examples)
     python_items = [
@@ -333,9 +338,10 @@ def build_raw_conversational_v2_pool() -> List[Dict[str, str]]:
         ("What method splits a string into a list of words in Python?", "The split() method splits a string into a list."),
         ("What method joins a list of strings into one string in Python?", "The join() method concatenates elements of an iterable into a single string."),
     ]
-    for p, r in python_items:
-        items.append({"category": "python_concepts", "prompt": p, "response": r})
-        items.append({"category": "python_concepts", "prompt": f"Python question: {p}", "response": r})
+    for i, (p, r) in enumerate(python_items):
+        cid = f"py_{i:03d}"
+        items.append({"concept_id": cid, "category": "python_concepts", "prompt": p, "response": r})
+        items.append({"concept_id": cid, "category": "python_concepts", "prompt": f"Python question: {p}", "response": r})
 
     # 7. Elementary Classification (~100 examples)
     classifications = [
@@ -368,10 +374,11 @@ def build_raw_conversational_v2_pool() -> List[Dict[str, str]]:
         ("Is an oak tree deciduous or evergreen?", "Most oak trees are deciduous, shedding leaves annually."),
         ("Is a butterfly an insect or a reptile?", "A butterfly is an insect."),
     ]
-    for p, r in classifications:
-        items.append({"category": "elementary_classification", "prompt": p, "response": r})
+    for i, (p, r) in enumerate(classifications):
+        cid = f"class_{i:03d}"
+        items.append({"concept_id": cid, "category": "elementary_classification", "prompt": p, "response": r})
         concise = r.split(" is an? ")[-1].rstrip(".") if " is an? " in r else r
-        items.append({"category": "elementary_classification", "prompt": f"Classify: {p}", "response": r})
+        items.append({"concept_id": cid, "category": "elementary_classification", "prompt": f"Classify: {p}", "response": r})
 
     # 8. Single-Step Instructions (~80 examples)
     instructions = [
@@ -406,9 +413,10 @@ def build_raw_conversational_v2_pool() -> List[Dict[str, str]]:
         ("Repeat the word signal twice.", "signal signal"),
         ("Output the word initialized.", "initialized"),
     ]
-    for p, r in instructions:
-        items.append({"category": "single_step_instructions", "prompt": p, "response": r})
-        items.append({"category": "single_step_instructions", "prompt": f"Instruction: {p}", "response": r})
+    for i, (p, r) in enumerate(instructions):
+        cid = f"inst_{i:03d}"
+        items.append({"concept_id": cid, "category": "single_step_instructions", "prompt": p, "response": r})
+        items.append({"concept_id": cid, "category": "single_step_instructions", "prompt": f"Instruction: {p}", "response": r})
 
     # 9. Small Lists (~80 examples)
     lists = [
@@ -435,9 +443,10 @@ def build_raw_conversational_v2_pool() -> List[Dict[str, str]]:
         ("Name two oceans on Earth other than the Pacific.", "Atlantic Ocean and Indian Ocean."),
         ("List two birds that cannot fly.", "Ostrich and penguin."),
     ]
-    for p, r in lists:
-        items.append({"category": "small_lists", "prompt": p, "response": r})
-        items.append({"category": "small_lists", "prompt": f"Please provide: {p}", "response": r})
+    for i, (p, r) in enumerate(lists):
+        cid = f"list_{i:03d}"
+        items.append({"concept_id": cid, "category": "small_lists", "prompt": p, "response": r})
+        items.append({"concept_id": cid, "category": "small_lists", "prompt": f"Please provide: {p}", "response": r})
 
     # 10. Simple Logical Relationships (~80 examples)
     logic = [
@@ -464,9 +473,10 @@ def build_raw_conversational_v2_pool() -> List[Dict[str, str]]:
         ("If you subtract five from five, what is left?", "Zero is left."),
         ("If a door is open, is it closed?", "No, it is not closed."),
     ]
-    for p, r in logic:
-        items.append({"category": "simple_logical_relationships", "prompt": p, "response": r})
-        items.append({"category": "simple_logical_relationships", "prompt": f"Logic question: {p}", "response": r})
+    for i, (p, r) in enumerate(logic):
+        cid = f"logic_{i:03d}"
+        items.append({"concept_id": cid, "category": "simple_logical_relationships", "prompt": p, "response": r})
+        items.append({"concept_id": cid, "category": "simple_logical_relationships", "prompt": f"Logic question: {p}", "response": r})
 
     # 11. Verified Arithmetic (~120 examples, strictly disjoint from benchmark)
     arithmetic = [
@@ -524,7 +534,8 @@ def build_raw_conversational_v2_pool() -> List[Dict[str, str]]:
         (32, 8, "/", 4),
         (21, 3, "/", 7),
     ]
-    for a, b, op, res in arithmetic:
+    for i, (a, b, op, res) in enumerate(arithmetic):
+        cid = f"arith_{i:03d}"
         if op == "+":
             p = f"What is {a} plus {b}?"
         elif op == "-":
@@ -535,8 +546,8 @@ def build_raw_conversational_v2_pool() -> List[Dict[str, str]]:
             p = f"What is {a} divided by {b}?"
         r_eq = f"{a} {op} {b} = {res}."
         r_short = f"{res}."
-        items.append({"category": "arithmetic", "prompt": p, "response": r_eq})
-        items.append({"category": "arithmetic", "prompt": f"Calculate: {p}", "response": r_short})
+        items.append({"concept_id": cid, "category": "arithmetic", "prompt": p, "response": r_eq})
+        items.append({"concept_id": cid, "category": "arithmetic", "prompt": f"Calculate: {p}", "response": r_short})
 
     # 12. Concise Constraint Responses (~80 examples)
     constraints = [
@@ -566,9 +577,10 @@ def build_raw_conversational_v2_pool() -> List[Dict[str, str]]:
         ("Answer in exactly one word: What color is an emerald gemstone?", "Green"),
         ("Reply with only yes or no: Do reptiles lay eggs?", "Yes"),
     ]
-    for p, r in constraints:
-        items.append({"category": "concise_constraint_responses", "prompt": p, "response": r})
-        items.append({"category": "concise_constraint_responses", "prompt": f"Strict constraint: {p}", "response": r})
+    for i, (p, r) in enumerate(constraints):
+        cid = f"constr_{i:03d}"
+        items.append({"concept_id": cid, "category": "concise_constraint_responses", "prompt": p, "response": r})
+        items.append({"concept_id": cid, "category": "concise_constraint_responses", "prompt": f"Strict constraint: {p}", "response": r})
 
     return items
 
@@ -636,6 +648,7 @@ def main():
 
         screened_items.append({
             "id": f"conv2_{len(screened_items):05d}",
+            "concept_id": item["concept_id"],
             "category": item["category"],
             "prompt": p_raw,
             "response": r_raw,
@@ -648,13 +661,32 @@ def main():
     assert collision_count == 0, f"Critical: {collision_count} benchmark collisions detected!"
     assert len(screened_items) >= 800, f"Expected at least 800 examples, got {len(screened_items)}"
 
-    # 5. Split 85% Train / 15% Val
-    random.shuffle(screened_items)
-    n_train = int(len(screened_items) * 0.85)
-    train_items = screened_items[:n_train]
-    val_items = screened_items[n_train:]
+    # 5. Split 85% Train / 15% Val grouped strictly by concept_id
+    concept_map: Dict[str, List[Dict[str, Any]]] = {}
+    for it in screened_items:
+        concept_map.setdefault(it["concept_id"], []).append(it)
 
-    logger.info(f"Split dataset: {len(train_items)} train (85%), {len(val_items)} validation (15%).")
+    concept_ids = sorted(list(concept_map.keys()))
+    random.seed(42)
+    random.shuffle(concept_ids)
+
+    train_items: List[Dict[str, Any]] = []
+    val_items: List[Dict[str, Any]] = []
+    target_train_count = int(len(screened_items) * 0.85)
+
+    for cid in concept_ids:
+        group = concept_map[cid]
+        if len(train_items) + len(group) <= target_train_count or not train_items:
+            train_items.extend(group)
+        else:
+            val_items.extend(group)
+
+    train_concepts = {it["concept_id"] for it in train_items}
+    val_concepts = {it["concept_id"] for it in val_items}
+    concept_leakage = train_concepts.intersection(val_concepts)
+    assert len(concept_leakage) == 0, f"Critical: Concept leakage detected between train and val: {concept_leakage}"
+
+    logger.info(f"Split dataset by concept_id: {len(train_items)} train (concepts={len(train_concepts)}), {len(val_items)} validation (concepts={len(val_concepts)}).")
 
     # 6. Save JSONL files
     JSONL_DIR.mkdir(parents=True, exist_ok=True)
@@ -672,10 +704,14 @@ def main():
 
     manifest = {
         "dataset_name": "sft_conversational_v2",
-        "created_at": "Step 48",
+        "created_at": "Step 49",
         "total_examples": len(screened_items),
         "train_examples": len(train_items),
         "val_examples": len(val_items),
+        "total_concepts": len(concept_map),
+        "train_concepts": len(train_concepts),
+        "val_concepts": len(val_concepts),
+        "concept_overlap": 0,
         "categories": sorted(list({it["category"] for it in screened_items})),
         "avg_prompt_tokens": round(sum(it["prompt_tokens"] for it in screened_items) / len(screened_items), 2),
         "avg_response_tokens": round(sum(it["response_tokens"] for it in screened_items) / len(screened_items), 2),

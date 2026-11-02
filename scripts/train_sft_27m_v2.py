@@ -168,6 +168,7 @@ def train():
 
     # 1. Load Base Checkpoint
     logger.info(f"Loading base checkpoint: {BASE_CHECKPOINT_PATH}...")
+    base_sha256 = hashlib.sha256(open(BASE_CHECKPOINT_PATH, "rb").read()).hexdigest()
     ckpt = torch.load(BASE_CHECKPOINT_PATH, map_location=device, weights_only=False)
     cfg = GPTConfig(**ckpt["model_config"])
     model = GroundUpGPT(cfg)
@@ -332,12 +333,18 @@ def train():
             }
             history.append(record)
 
-            # Save latest checkpoint
+            # Save latest checkpoint with complete optimizer, scaler, and parent metadata
             latest_ckpt = {
                 "step": step,
                 "global_step": source_global_step + step,
                 "model_config": ckpt["model_config"],
                 "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "scaler_state_dict": scaler.state_dict() if scaler is not None else None,
+                "parent_checkpoint_path": str(BASE_CHECKPOINT_PATH),
+                "parent_checkpoint_sha256": base_sha256,
+                "rng_state_torch": torch.get_rng_state(),
+                "rng_state_cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
                 "val_metrics": record,
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }

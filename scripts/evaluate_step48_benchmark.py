@@ -84,6 +84,7 @@ def grade_prompt(item: Dict[str, Any], raw_response: str) -> Dict[str, Any]:
         return {
             "passed": False,
             "is_objective": is_objective,
+            "requires_qualitative_review": not is_objective or task_type == "open_ended_conversational",
             "reason": "Empty or delimiter-only response",
             "task_type": task_type,
         }
@@ -93,6 +94,7 @@ def grade_prompt(item: Dict[str, Any], raw_response: str) -> Dict[str, Any]:
         return {
             "passed": False,
             "is_objective": is_objective,
+            "requires_qualitative_review": not is_objective or task_type == "open_ended_conversational",
             "reason": f"Prompt echoed without answering: '{clean_r[:50]}'",
             "task_type": task_type,
         }
@@ -103,7 +105,13 @@ def grade_prompt(item: Dict[str, Any], raw_response: str) -> Dict[str, Any]:
         # Check if contains any acceptable equivalents or reasonable content
         # Check against common hallucination patterns like raw Python code blocks or gibberish
         if len(clean_r) < 3:
-            return {"passed": False, "is_objective": False, "reason": "Too short response (<3 chars)", "task_type": task_type}
+            return {
+                "passed": False,
+                "is_objective": False,
+                "requires_qualitative_review": True,
+                "reason": "Too short response (<3 chars)",
+                "task_type": task_type,
+            }
         
         # Check if response has some semantic alignment
         acc_equivs = item.get("acceptable_equivalents", [])
@@ -112,26 +120,33 @@ def grade_prompt(item: Dict[str, Any], raw_response: str) -> Dict[str, Any]:
         # Check for obvious incoherent jargon
         incoherent_indicators = ["def ", "class ", "import ", "http://", "```", "sold to today"]
         if any(ind in norm_r for ind in incoherent_indicators):
-            return {"passed": False, "is_objective": False, "reason": f"Incoherent or hallucinated jargon in reply: '{clean_r[:50]}'", "task_type": task_type}
+            return {
+                "passed": False,
+                "is_objective": False,
+                "requires_qualitative_review": True,
+                "reason": f"Incoherent or hallucinated jargon in reply: '{clean_r[:50]}'",
+                "task_type": task_type,
+            }
 
         return {
             "passed": has_relevant_concept,
             "is_objective": False,
-            "reason": "Relevant conversational response" if has_relevant_concept else "Plausible response but lacked key conversational concept",
+            "requires_qualitative_review": True,
+            "reason": "Relevant conversational response (heuristic keyword match)" if has_relevant_concept else "Plausible response but lacked key conversational concept",
             "task_type": task_type,
         }
 
     # Arithmetic
     if task_type == "numeric_arithmetic":
         res = evaluate_arithmetic(prompt, clean_r)
-        return {"passed": res.passed, "is_objective": True, "reason": res.reason, "task_type": task_type}
+        return {"passed": res.passed, "is_objective": True, "requires_qualitative_review": False, "reason": res.reason, "task_type": task_type}
 
     # Exact Factual
     if task_type == "exact_factual_qa":
         target = item["expected_answer"]
         aliases = item.get("acceptable_equivalents", [target])
         res = evaluate_exact_factual(prompt, clean_r, target_answer=target, aliases=aliases)
-        return {"passed": res.passed, "is_objective": True, "reason": res.reason, "task_type": task_type}
+        return {"passed": res.passed, "is_objective": True, "requires_qualitative_review": False, "reason": res.reason, "task_type": task_type}
 
     # Binary Classification
     if task_type == "binary_classification":
@@ -152,7 +167,7 @@ def grade_prompt(item: Dict[str, Any], raw_response: str) -> Dict[str, Any]:
             incorrect = "unknown"
 
         res = evaluate_binary_classification(prompt, clean_r, correct_category=correct, incorrect_category=incorrect)
-        return {"passed": res.passed, "is_objective": True, "reason": res.reason, "task_type": task_type}
+        return {"passed": res.passed, "is_objective": True, "requires_qualitative_review": False, "reason": res.reason, "task_type": task_type}
 
     # Scientific Definitions
     if task_type == "scientific_definitions":
@@ -162,7 +177,7 @@ def grade_prompt(item: Dict[str, Any], raw_response: str) -> Dict[str, Any]:
         res = evaluate_scientific_definition(
             prompt, clean_r, defined_term=defined_term, required_concept_groups=concept_groups, min_groups_required=1
         )
-        return {"passed": res.passed, "is_objective": True, "reason": res.reason, "task_type": task_type}
+        return {"passed": res.passed, "is_objective": True, "requires_qualitative_review": False, "reason": res.reason, "task_type": task_type}
 
     # Requested N-Item Lists
     if task_type == "requested_n_item_lists":
@@ -172,7 +187,7 @@ def grade_prompt(item: Dict[str, Any], raw_response: str) -> Dict[str, Any]:
         if "three" in prompt.lower():
             min_count = 3
         res = evaluate_n_item_list(prompt, clean_r, min_count=min_count, valid_pool=valid_pool)
-        return {"passed": res.passed, "is_objective": True, "reason": res.reason, "task_type": task_type}
+        return {"passed": res.passed, "is_objective": True, "requires_qualitative_review": False, "reason": res.reason, "task_type": task_type}
 
     # Deterministic Text Transformation
     if task_type == "deterministic_text_transformation":
@@ -180,9 +195,9 @@ def grade_prompt(item: Dict[str, Any], raw_response: str) -> Dict[str, Any]:
         # Case sensitivity depends on prompt
         case_sensitive = "uppercase" in prompt.lower() or "capitalize" in prompt.lower()
         res = evaluate_text_transformation(prompt, clean_r, expected_substring=expected, case_sensitive=case_sensitive)
-        return {"passed": res.passed, "is_objective": True, "reason": res.reason, "task_type": task_type}
+        return {"passed": res.passed, "is_objective": True, "requires_qualitative_review": False, "reason": res.reason, "task_type": task_type}
 
-    return {"passed": False, "is_objective": is_objective, "reason": f"Unhandled task type: {task_type}", "task_type": task_type}
+    return {"passed": False, "is_objective": is_objective, "requires_qualitative_review": not is_objective, "reason": f"Unhandled task type: {task_type}", "task_type": task_type}
 
 
 def evaluate_checkpoint_on_benchmark(
@@ -321,9 +336,12 @@ def evaluate_checkpoint_on_benchmark(
 
         eval_results[mode_name] = {
             "total_prompts": len(prompts),
+            "primary_objective_accuracy": round(obj_accuracy, 4),
             "objective_total": obj_total,
             "objective_passed": obj_passed,
             "objective_accuracy": round(obj_accuracy, 4),
+            "heuristic_phrase_match_indicator": round(qual_accuracy, 4),
+            "heuristic_disclaimer": "Non-objective heuristic based on keyword presence; requires manual qualitative review. Not an indicator of verified semantic correctness.",
             "qualitative_total": qual_total,
             "qualitative_passed": qual_passed,
             "qualitative_accuracy": round(qual_accuracy, 4),
@@ -378,13 +396,13 @@ def main():
     for mode in ["greedy", "calibrated"]:
         m = result["results"][mode]
         print(f"Mode: {mode.upper()}")
-        print(f"  Objective Accuracy:       {m['objective_passed']}/{m['objective_total']} ({m['objective_accuracy']*100:.1f}%)")
-        print(f"  Qualitative Accuracy:     {m['qualitative_passed']}/{m['qualitative_total']} ({m['qualitative_accuracy']*100:.1f}%)")
-        print(f"  Delimiter Stop Rate:      {m['delimiter_stopping_rate']*100:.1f}%")
-        print(f"  3-Gram Repetition Rate:   {m['avg_3gram_repetition_rate']*100:.1f}%")
-        print(f"  Avg Tokens / Response:    {m['avg_tokens_per_response']}")
-        print(f"  Throughput:               {m['throughput_tokens_per_sec']:.1f} tok/s")
-        print(f"  Peak VRAM:                {m['peak_vram_mb']:.1f} MB")
+        print(f"  Primary Objective Accuracy:       {m['objective_passed']}/{m['objective_total']} ({m['objective_accuracy']*100:.1f}%) [STRICT OBJECTIVE]")
+        print(f"  Heuristic Phrase Match Indicator: {m['qualitative_passed']}/{m['qualitative_total']} ({m['heuristic_phrase_match_indicator']*100:.1f}%) [Unverified Heuristic]")
+        print(f"  Delimiter Stop Rate:              {m['delimiter_stopping_rate']*100:.1f}%")
+        print(f"  3-Gram Repetition Rate:           {m['avg_3gram_repetition_rate']*100:.1f}%")
+        print(f"  Avg Tokens / Response:            {m['avg_tokens_per_response']}")
+        print(f"  Throughput:                       {m['throughput_tokens_per_sec']:.1f} tok/s")
+        print(f"  Peak VRAM:                        {m['peak_vram_mb']:.1f} MB")
         print("-" * 70)
 
 
