@@ -18,6 +18,7 @@ GroundUpGPT is an educational and engineering project dedicated to designing, im
 
 - **Quick Start & Application**:
   - [Chatbot Quickstart & Limitations](#chatbot-quickstart--limitations)
+  - [Document Attachment & Local Grounding](#document-attachment--local-grounding-support)
   - [One-Click Windows Launchers](#one-click-launchers-windows)
   - [Web Chat Interface (Next.js & Tailwind)](#web-chat-interface-nextjs--tailwind)
   - [Local FastAPI Inference Backend & Streaming](#local-fastapi-inference-backend--sse-streaming)
@@ -513,6 +514,25 @@ GroundUpGPT features a minimal, ChatGPT-style web chat interface built with mode
    For privacy and zero unexpected background disk writes, conversation persistence in the local SQLite database (`chat_history.db`) is strictly **opt-in and turned OFF by default**. You can enable "Save chats locally" at any time by clicking the **Settings** gear icon at the bottom of the sidebar.
 6. **Realistic Expectations & 27M Model Limitations**:
    GroundUpGPT-27M is a compact ~27.4-million-parameter Transformer trained entirely from scratch on consumer hardware (single NVIDIA RTX 3050 6GB GPU). While deterministic tools (`SafeCalculator`), curated records (`LocalFactRetriever`), and local document grounding provide exact answers, the raw 27M neural model has limited conversational accuracy, world knowledge, and multi-step reasoning capacity compared to commercial billion-parameter LLMs.
+
+### Document Attachment & Local Grounding Support
+
+GroundUpGPT supports attaching external documents for local question-answering and context grounding directly through the chat composer's + button:
+
+- **Supported Formats**:
+  - Plain Text (.txt)
+  - Markdown (.md, .markdown)
+  - Adobe PDF (.pdf) via pypdf
+  - Microsoft Word (.docx) via python-docx
+- **Upload & Context Limits**:
+  - Raw file uploads are bounded to a maximum of **10 MB** per file.
+  - Extracted text is capped at **16 KB** per source (matching the local knowledge retrieval session limit).
+- **100% Local, Air-Gapped Extraction**:
+  - Text parsing runs entirely inside the local Python runtime without external cloud document APIs, remote telemetry, or third-party web services.
+- **Extraction Limitations & Non-Supported Cases**:
+  - **No OCR (Optical Character Recognition)**: Extraction relies on native text streams. Scanned documents or image-only PDFs without digital text layers will return a clear notification and cannot be parsed.
+  - **Encrypted & Password-Protected Files**: Password-protected PDFs or encrypted Office documents are safely rejected.
+  - **Legacy Formats**: Older binary formats (.doc, .ppt, .xls) and rich image formats (.png, .jpg) are not supported.
 
 ### Core Interface Features
 - **User Interface Features**:
