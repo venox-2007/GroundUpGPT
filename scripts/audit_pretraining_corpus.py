@@ -4,7 +4,7 @@ Audits the original pretraining corpus (data/cache_27m_v1/):
 - Unique source documents (Gutenberg books vs Simple Wikipedia articles)
 - Total raw bytes and on-disk footprint
 - Total unique tokens (train, val, total)
-- Training token exposures and epoch coverage (5,949 steps * 16 * 256)
+- Training token exposures and corpus exposure ratio (5,949 steps * 8 * 4 * 256 = 48,734,208 tokens)
 - Gutenberg vs Simple Wikipedia distribution
 - Document length distribution (min, max, mean, median, quartiles)
 - Duplicate / near-duplicate analysis
@@ -113,12 +113,14 @@ def run_corpus_audit() -> Dict[str, Any]:
 
     # Token exposures during pretraining (Phase 1-4: 5,949 steps)
     pretraining_steps = 5949
-    batch_size = 16
+    micro_batch_size = 8
+    gradient_accumulation_steps = 4
+    effective_batch_size = micro_batch_size * gradient_accumulation_steps  # 32
     block_size = 256
-    tokens_per_step = batch_size * block_size  # 4,096
-    total_tokens_exposed = pretraining_steps * tokens_per_step  # 24,367,104
-    epoch_coverage_pct = (total_tokens_exposed / train_tokens) * 100  # 48.44%
-    effective_epochs = total_tokens_exposed / train_tokens  # 0.4844
+    tokens_per_step = effective_batch_size * block_size  # 8,192
+    total_tokens_exposed = pretraining_steps * tokens_per_step  # 48,734,208
+    token_exposure_ratio = total_tokens_exposed / train_tokens  # ~0.9688
+    token_exposure_pct = token_exposure_ratio * 100
 
     # Document length statistics
     # From Gutenberg documents
@@ -223,17 +225,21 @@ def run_corpus_audit() -> Dict[str, Any]:
         "training_token_exposures": {
             "checkpoint_audited": "checkpoints/27m_phase4/model_27m_best.pt",
             "pretraining_optimizer_steps": pretraining_steps,
-            "micro_batch_size": batch_size,
+            "micro_batch_size": micro_batch_size,
+            "gradient_accumulation_steps": gradient_accumulation_steps,
+            "effective_batch_size": effective_batch_size,
             "sequence_block_size": block_size,
             "tokens_per_step": tokens_per_step,
             "total_tokens_exposed": total_tokens_exposed,
             "corpus_unique_train_tokens": train_tokens,
-            "single_epoch_coverage_pct": round(epoch_coverage_pct, 2),
-            "effective_epochs_completed": round(effective_epochs, 4),
-            "undertrained_diagnosis": (
-                "The 27M model was trained for 5,949 steps, exposing it to 24.37M tokens against a 50.30M token "
-                "training corpus. It completed only ~0.48 epochs (under half of a single epoch), meaning more than "
-                "51% of the pretraining data was never seen by the optimizer during initial pretraining."
+            "token_exposure_ratio": round(token_exposure_ratio, 4),
+            "equivalent_corpus_passes": round(token_exposure_ratio, 2),
+            "exposure_accounting_note": (
+                "The 27M model was trained for 5,949 optimizer steps with an effective batch size of 32 "
+                "(micro-batch size 8 * gradient accumulation 4) at context length 256, yielding 8,192 tokens per step "
+                "and 48,734,208 total token exposures against a 50,301,446 token training corpus (~0.97 equivalent "
+                "corpus passes). Note that stochastic slice sampling with replacement means ~0.97 equivalent passes "
+                "does not guarantee complete uniform coverage of every single token in the corpus."
             ),
         },
         "document_length_distribution": {
@@ -275,11 +281,12 @@ def run_corpus_audit() -> Dict[str, Any]:
     print("-" * 70)
     print("TRAINING TOKEN EXPOSURE AUDIT:")
     print(f"  Pretraining Steps:       {pretraining_steps:,}")
-    print(f"  Batch * SeqLen:          {batch_size} * {block_size} = {tokens_per_step:,} tokens/step")
+    print(f"  Effective Batch Size:    {micro_batch_size} * {gradient_accumulation_steps} = {effective_batch_size} seqs")
+    print(f"  Tokens Per Step:         {effective_batch_size} * {block_size} = {tokens_per_step:,} tokens/step")
     print(f"  Total Token Exposures:   {total_tokens_exposed:,}")
     print(f"  Corpus Unique Tokens:    {train_tokens:,}")
-    print(f"  Epoch Coverage:          {epoch_coverage_pct:.2f}% ({effective_epochs:.2f} epochs)")
-    print(f"  CRITICAL DIAGNOSIS:      MODEL SAW LESS THAN HALF OF CORPUS (< 0.49 EPOCHS)")
+    print(f"  Equivalent Corpus Passes:{token_exposure_ratio:.2f}x ({token_exposure_pct:.2f}% exposure ratio)")
+    print(f"  EXPOSURE NOTE:           ~0.97 equivalent passes; random sampling does not guarantee 100% token coverage.")
     print("-" * 70)
     print("SIMPLE WIKIPEDIA EXPANSION POTENTIAL:")
     print(f"  Total Row Groups:        242 (~241,787 articles)")
