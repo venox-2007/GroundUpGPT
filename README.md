@@ -20,6 +20,7 @@ GroundUpGPT is an educational and engineering project dedicated to designing, im
   - [Chatbot Quickstart & Limitations](#chatbot-quickstart--limitations)
   - [Document Attachment & Local Grounding](#document-attachment--local-grounding-support)
   - [One-Click Windows Launchers](#one-click-launchers-windows)
+  - [Local Setup Troubleshooting](#local-setup-troubleshooting)
   - [Web Chat Interface (Next.js & Tailwind)](#web-chat-interface-nextjs--tailwind)
   - [Local FastAPI Inference Backend & Streaming](#local-fastapi-inference-backend--sse-streaming)
 - **Architecture & Foundations**:
@@ -574,6 +575,15 @@ npm.cmd run dev
 ```
 
 Visit `http://localhost:3000` in your browser.
+
+### Local Setup Troubleshooting
+
+| Issue | Root Cause | Recommended Fix |
+|---|---|---|
+| **Backend Offline / Connection Failed** | The FastAPI service is not running on `127.0.0.1:8000`. | Run `python -m backend.main` or double-click `Start GroundUpGPT.bat`. Check console logs for missing Python dependencies. |
+| **Missing Checkpoints** | Model checkpoint files (`checkpoints/*.pt`) have not been trained or placed. | When prompted by `Start GroundUpGPT.bat`, accept generating demo artifacts, or run `python scripts/train_demo_model.py` for a lightweight baseline. |
+| **Port Conflicts (3000 / 8000 in use)** | Previous background Node or Python processes are holding the ports. | Run `Stop GroundUpGPT.bat` from the repository root, or inspect `netstat -ano \| findstr :8000` and kill the PID with `taskkill /PID <pid> /F`. |
+| **Unsupported Document / Extraction Warning** | File is larger than 10 MB, password-encrypted, or a scanned PDF lacking text streams. | GroundUpGPT uses air-gapped text parsers without OCR. Use PDFs with selectable text layers, convert scanned images, or save as `.txt`/`.md`. |
 
 ---
 
