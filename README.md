@@ -16,29 +16,26 @@ GroundUpGPT is an educational and engineering project dedicated to designing, im
 
 ## Table of Contents
 
-- [Project Overview](#project-overview)
-- [Project Blueprint & Specification](#project-blueprint--specification)
-- [Learning & Engineering Objectives](#learning--engineering-objectives)
-- [Hardware Target & Constraints](#hardware-target--constraints)
-- [Planned Architecture](#planned-architecture)
-- [Technology Stack](#technology-stack)
-- [Development Roadmap](#development-roadmap)
-- [Repository Structure](#repository-structure)
-- [Windows Environment Setup](#windows-environment-setup)
-- [Running Environment Verification](#running-environment-verification)
-- [Character-Level Tokenizer](#character-level-tokenizer)
-- [Bigram Language Model Baseline](#bigram-language-model-baseline)
-- [Dataset Ingestion & Batching Pipeline](#dataset-ingestion--batching-pipeline)
-- [Byte-Level BPE Tokenizer](#byte-level-bpe-tokenizer)
-- [Token Embeddings & Causal Self-Attention](#token-embeddings--causal-self-attention)
-- [Multi-Head Attention & Transformer Block](#multi-head-attention--transformer-block)
-- [Complete GroundUpGPT Model Architecture](#complete-groundupgpt-model-architecture)
-- [GPU Training Infrastructure & Optimizer](#gpu-training-infrastructure--optimizer)
-- [Autoregressive Text Generation & Streaming Engine](#autoregressive-text-generation--streaming-engine)
-- [Local FastAPI Inference Backend & SSE Streaming](#local-fastapi-inference-backend--sse-streaming)
-- [Web Chat Interface (Next.js & Tailwind)](#web-chat-interface-nextjs--tailwind)
-- [Chatbot Quickstart & Limitations](#chatbot-quickstart--limitations)
-- [Current Implementation Status](#current-implementation-status)
+- **Quick Start & Application**:
+  - [Chatbot Quickstart & Limitations](#chatbot-quickstart--limitations)
+  - [One-Click Windows Launchers](#one-click-launchers-windows)
+  - [Web Chat Interface (Next.js & Tailwind)](#web-chat-interface-nextjs--tailwind)
+  - [Local FastAPI Inference Backend & Streaming](#local-fastapi-inference-backend--sse-streaming)
+- **Architecture & Foundations**:
+  - [Project Overview & Blueprint](#project-overview)
+  - [Technology Stack & Hardware Target](#technology-stack)
+  - [Byte-Level BPE Tokenizer](#byte-level-bpe-tokenizer)
+  - [Complete GroundUpGPT Model Architecture](#complete-groundupgpt-model-architecture)
+  - [GPU Training Infrastructure & Optimizer](#gpu-training-infrastructure--optimizer)
+  - [Scaled 27M GPT Architecture & Pretraining](#scaled-gpt-architecture--gpu-feasibility-benchmark-step-30)
+- **Fine-Tuning, Tools & Knowledge**:
+  - [Supervised Instruction Fine-Tuning (SFT)](#supervised-instruction-fine-tuning-sft---steps-26--27)
+  - [Conversational Anchors & Evaluation](#step-40---targeted-conversational-fine-tuning-with-verified-short-answer-anchors)
+  - [Tool-Assisted Chat & Safe Calculator](#step-43-opt-in-tool-assisted-chat-safe-calculator-local-facts-and-transparent-answer-origins)
+- **Project Governance**:
+  - [Repository Structure & Environment Setup](#windows-environment-setup)
+  - [Development Roadmap](#development-roadmap)
+  - [Current Implementation Status (Steps 1–50)](#current-implementation-status)
 
 ---
 
