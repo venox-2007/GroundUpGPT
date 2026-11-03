@@ -37,6 +37,7 @@ GroundUpGPT is an educational and engineering project dedicated to designing, im
 - **Project Governance**:
   - [Repository Structure & Environment Setup](#windows-environment-setup)
   - [Development Roadmap](#development-roadmap)
+  - [Planned Work & Future Horizons](#planned-work--future-horizons)
   - [Current Implementation Status (Steps 1–50)](#current-implementation-status)
 
 ---
@@ -205,7 +206,36 @@ The project follows a phased, test-driven development plan:
   - Live execution telemetry: generated tokens, generation speed (`tok/s`), elapsed time, active context tokens, and context-cropped indicator.
   - In-sidebar sampling controls: temperature, nucleus top-$p$, top-$k$, max new tokens, and random seed.
   - Session chat management: clear conversation and keyboard shortcuts (Enter to send, Shift+Enter for newline).
-- [ ] **Step 14: Persistent Storage & SQLite Conversation History**
+- [x] **Steps 14–25: Scaled 5M Pretraining, Evaluation & Production BPE**
+  - Production 4,096-vocabulary byte-level BPE tokenizer with binary token caches (`data/cache/`).
+  - Pretraining 5.05M parameter model over Project Gutenberg corpus, reproducible frozen evaluation baselines, and dynamic profile switching.
+- [x] **Steps 26–35: Scaled 27M Architecture & Multi-Domain Pretraining**
+  - Scaled 27.41M parameter Transformer architecture ($d_{model}=512$, 8 layers, 8 heads, PyTorch SDPA support).
+  - Pretraining corpus expansion to 50.3M tokens (Project Gutenberg + Simple English Wikipedia).
+  - Four monitored pretraining phases on RTX 3050 Laptop GPU achieving val loss 3.5768 (PPL 35.8).
+- [x] **Steps 36–43: Supervised Instruction Fine-Tuning & Deterministic Tools**
+  - Conversational fine-tuning on Databricks Dolly 15k and curated conversational anchor dataset.
+  - Task-specific deterministic evaluation engine with strict rubrics.
+  - Safe AST-based arithmetic calculator (`SafeCalculator`) and curated local fact lookup (`LocalFactRetriever`).
+  - Opt-in tool-assisted assistant router with transparent answer origin attribution badges.
+- [x] **Steps 44–50: Knowledge Grounding, Chat History & ChatGPT UI Redesign**
+  - Session-isolated user knowledge retrieval (BM25) with contradiction detection and token budget management.
+  - Opt-in SQLite local chat history persistence with search, renaming, and cascading deletions.
+  - Neural conversational fine-tuning v2 (tri-blended sampling) and continued pretraining across 22.8M Wikipedia tokens.
+  - Complete ChatGPT-style minimal UI overhaul with multi-format local document extraction (`.txt`, `.md`, `.pdf`, `.docx`).
+
+### Planned Work & Future Horizons
+
+While Steps 1–50 successfully complete the foundational Transformer, local training pipeline, deterministic tools, and full-stack web chat interface, upcoming research and engineering directions include:
+
+1. **Advanced Conversational Fine-Tuning & Alignment**:
+   - Curate richer multi-turn conversational datasets and implement preference optimization (e.g. Direct Preference Optimization / DPO) to strengthen instruction following and curb hallucinations in small-parameter regimes.
+2. **Multi-Turn Context & Dynamic Memory**:
+   - Extend conversational context beyond the current 256-token single-turn window using sliding-window attention, token compression, or Rotary Position Embeddings (RoPE).
+3. **Dense Semantic Retrieval (Neural RAG)**:
+   - Complement the existing exact/BM25 retrieval engine with lightweight local embedding models for semantic document chunk search.
+4. **Model Quantization & Accelerated Edge Inference**:
+   - Benchmark INT8 / INT4 post-training quantization and explore ONNX runtime export for ultra-fast local CPU inference.
 
 ---
 
