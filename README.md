@@ -37,6 +37,7 @@ GroundUpGPT is an educational and engineering project dedicated to designing, im
 - [Autoregressive Text Generation & Streaming Engine](#autoregressive-text-generation--streaming-engine)
 - [Local FastAPI Inference Backend & SSE Streaming](#local-fastapi-inference-backend--sse-streaming)
 - [Web Chat Interface (Next.js & Tailwind)](#web-chat-interface-nextjs--tailwind)
+- [Chatbot Quickstart & Limitations](#chatbot-quickstart--limitations)
 - [Current Implementation Status](#current-implementation-status)
 
 ---
@@ -499,7 +500,24 @@ uvicorn backend.app:app --host 127.0.0.1 --port 8000
 
 ## Web Chat Interface (Next.js & Tailwind)
 
-Step 13 delivers a clean, responsive web chat interface built with modern Next.js 14 (App Router), React 18, TypeScript, and Tailwind CSS (`frontend/`):
+GroundUpGPT features a minimal, ChatGPT-style web chat interface built with modern Next.js 14 (App Router), React 18, TypeScript, and Tailwind CSS (`frontend/`), communicating with our high-throughput local FastAPI backend (`backend/`).
+
+### Chatbot Quickstart & Limitations
+
+1. **Windows Launch**:
+   Double-click `Start GroundUpGPT.bat` in the repository root (or run `powershell -ExecutionPolicy Bypass -File .\scripts\start_app.ps1`). The launcher validates the local Python virtual environment, Node.js installation, and checkpoint integrity, launching both services automatically.
+2. **Local Chat UI**:
+   Open **`http://localhost:3000`** in your browser (the FastAPI inference backend runs locally at `http://127.0.0.1:8000`).
+3. **Sending Messages & Attaching Documents**:
+   Type in the bottom message composer and press **Enter** (or click the up-arrow send button). To ask questions grounded in local files, click the **`+`** attachment button to upload `.txt`, `.md`, `.pdf` (via `pypdf`), or `.docx` (via `python-docx`) files (up to 10 MB per file, extracted 100% locally with zero cloud APIs).
+4. **Accessing Previous Conversations**:
+   Saved conversations appear in the left sidebar under **Recent**. You can filter chats instantly with **Search chats**, or rename and delete previous sessions via inline actions.
+5. **Opt-In Local Chat History (Default OFF)**:
+   For privacy and zero unexpected background disk writes, conversation persistence in the local SQLite database (`chat_history.db`) is strictly **opt-in and turned OFF by default**. You can enable "Save chats locally" at any time by clicking the **Settings** gear icon at the bottom of the sidebar.
+6. **Realistic Expectations & 27M Model Limitations**:
+   GroundUpGPT-27M is a compact ~27.4-million-parameter Transformer trained entirely from scratch on consumer hardware (single NVIDIA RTX 3050 6GB GPU). While deterministic tools (`SafeCalculator`), curated records (`LocalFactRetriever`), and local document grounding provide exact answers, the raw 27M neural model has limited conversational accuracy, world knowledge, and multi-step reasoning capacity compared to commercial billion-parameter LLMs.
+
+### Core Interface Features
 - **User Interface Features**:
   - **ChatGPT-Inspired Layout**: Dark-themed slate palette with teal accents, responsive collapsible sidebar, and clean typography.
   - **Sidebar Telemetry & Status**: Live connection indicator, parameter counts, context window limit, device (`CUDA`/`CPU`), and checkpoint metadata.
