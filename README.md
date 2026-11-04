@@ -34,7 +34,8 @@ GroundUpGPT is an educational and engineering project dedicated to designing, im
   - [Supervised Instruction Fine-Tuning (SFT)](#supervised-instruction-fine-tuning-sft---steps-26--27)
   - [Conversational Anchors & Evaluation](#step-40---targeted-conversational-fine-tuning-with-verified-short-answer-anchors)
   - [Tool-Assisted Chat & Safe Calculator](#step-43-opt-in-tool-assisted-chat-safe-calculator-local-facts-and-transparent-answer-origins)
-- **Project Governance**:
+- **Project Governance & References**:
+  - [Reference Documentation & Guides](#reference-documentation--guides)
   - [Repository Structure & Environment Setup](#windows-environment-setup)
   - [Development Roadmap](#development-roadmap)
   - [Planned Work & Future Horizons](#planned-work--future-horizons)
@@ -58,6 +59,17 @@ By implementing each operation explicitly:
 For a comprehensive, end-to-end design blueprint outlining the long-term vision—including the future full-stack chat application (FastAPI, SQLite, Next.js/React, TypeScript, Tailwind CSS), evaluation framework, and memory systems—consult:
 
 👉 **[PROJECT_SPEC.md](PROJECT_SPEC.md)**: Full architecture specifications, phased milestones, hardware boundaries, and verification standards.
+
+### Reference Documentation & Guides
+
+For detailed architectural, modeling, and operational references:
+- **[System Architecture](docs/ARCHITECTURE.md)**: Full-stack Next.js $\to$ FastAPI $\to$ Router $\to$ Model/Tools data flow and SSE diagrams.
+- **[Model Card (27M)](docs/MODEL_CARD.md)**: Verified 27M Transformer architecture, training lineage, objective evaluation, and capacity boundaries.
+- **[API Usage Examples](docs/API_EXAMPLES.md)**: Tested local REST and SSE streaming request/response schemas.
+- **[Dataset Provenance](docs/DATA_SOURCES.md)**: Gutenberg, Simple Wikipedia, and Dolly 15k sources, licenses, and token occurrence definitions.
+- **[Privacy & Local Storage](docs/PRIVACY.md)**: Opt-in SQLite persistence, ephemeral knowledge sessions, and local execution boundaries.
+- **[Security Policy](SECURITY.md)**: Localhost threat model, air-gapped assumptions, and vulnerability reporting.
+- **[Contributing Guidelines](CONTRIBUTING.md)**: Development setup, coding standards, and targeted pytest instructions.
 
 ---
 
